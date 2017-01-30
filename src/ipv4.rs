@@ -202,6 +202,9 @@ impl Repr {
 
         let payload_len = packet.total_len() as usize - packet.header_len() as usize;
         if packet.payload().len() < payload_len {
+            println!("calculated: {}, actual: {}",
+                     payload_len,
+                     packet.payload().len());
             return Err(Error::Truncated);
         }
 
@@ -215,6 +218,7 @@ impl Repr {
 
 pub mod checksum {
     use byteorder::{ByteOrder, NetworkEndian};
+    use super::{TCP_PROTOCOL, Address};
 
     fn propogate_carries(word: u32) -> u16 {
         let mut word = word;
@@ -238,5 +242,13 @@ pub mod checksum {
         }
 
         !propogate_carries(sum)
+    }
+
+    pub fn pseudo_header(src_addr: &Address, dst_addr: &Address, length: u16) -> u32 {
+        let src = src_addr.as_beu32().to_be();
+        let dst = dst_addr.as_beu32().to_be();
+
+        (src >> 16) + (src & 0xFFFF) + (dst >> 16) + (dst & 0xFFFF) + (length.to_be() as u32) +
+        (TCP_PROTOCOL as u32)
     }
 }

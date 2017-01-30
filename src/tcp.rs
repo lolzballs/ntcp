@@ -134,10 +134,18 @@ impl<'a> Packet<'a> {
         buf[field::OFF_FLG.end] & 0x01 != 0
     }
 
+    #[inline]
     pub fn payload(&self) -> &[u8] {
         let len = (self.data_offset()) as usize;
         let buf = self.buffer.as_ref();
         &buf[len..]
+    }
+
+    pub fn checksum_valid(&self, src_addr: &ipv4::Address, dst_addr: &ipv4::Address) -> bool {
+        use ipv4::checksum;
+        checksum::compute(&self.buffer,
+                          checksum::pseudo_header(src_addr, dst_addr, self.buffer.len() as u16)) ==
+        0
     }
 }
 
@@ -179,6 +187,10 @@ impl<'a> Repr<'a> {
         if packet.dst_port() == 0 {
             return Err(Error::Malformed);
         }
+
+        // if !packet.checksum_valid(src_addr, dst_addr) {
+        //    return Err(Error::Checksum);
+        // }
 
         let src_port = packet.src_port();
         let dst_port = packet.dst_port();

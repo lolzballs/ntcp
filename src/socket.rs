@@ -42,14 +42,23 @@ impl Socket {
             let iprepr = match ipv4::Repr::parse(&ip) {
                 Ok(repr) => repr,
                 Err(Error::UnknownProtocol) => continue,
-                Err(Error::Truncated) => panic!("Truncated packet"),
+                Err(Error::Truncated) => {
+                    println!("WARN: IPv4 packet exceeded MTU");
+                    continue;
+                }
                 Err(error) => {
                     println!("WARN: IPv4 packet {:?}", error);
                     continue;
                 }
             };
             let tcp = tcp::Packet::new(&ip.payload()).unwrap();
-            let tcprepr = tcp::Repr::parse(&tcp, &iprepr.src_addr, &iprepr.dst_addr).unwrap();
+            let tcprepr = match tcp::Repr::parse(&tcp, &iprepr.src_addr, &iprepr.dst_addr) {
+                Ok(repr) => repr,
+                Err(error) => {
+                    println!("WARN: TCP packet {:?}", error);
+                    continue;
+                }
+            };
             if tcprepr.dst_port == self.endpoint.port {
                 println!("{:?}", ip);
                 println!("{:?}", tcp);
