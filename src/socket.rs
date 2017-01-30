@@ -43,16 +43,8 @@ impl Socket {
                 Ok(repr) => repr,
                 Err(Error::UnknownProtocol) => continue,
                 Err(Error::Truncated) => panic!("Truncated packet"),
-                Err(Error::Unrecognized) => {
-                    println!("WARN: IPv4 packet contained Options");
-                    continue;
-                }
-                Err(Error::Malformed) => {
-                    println!("WARN: IPv4 packet was malformed");
-                    continue;
-                }
-                Err(Error::Fragmented) => {
-                    println!("WARN: IPv4 packet was fragmented");
+                Err(error) => {
+                    println!("WARN: IPv4 packet {:?}", error);
                     continue;
                 }
             };

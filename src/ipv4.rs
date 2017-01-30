@@ -148,6 +148,10 @@ impl<'a> Packet<'a> {
         let buf = self.buffer.as_ref();
         &buf[self.header_len() as usize..]
     }
+
+    pub fn checksum_valid(&self) -> bool {
+        checksum::compute(&self.buffer[..self.header_len() as usize], 0) == 0
+    }
 }
 
 impl<'a> fmt::Debug for Packet<'a> {
@@ -192,6 +196,10 @@ impl Repr {
             return Err(Error::UnknownProtocol);
         }
 
+        if !packet.checksum_valid() {
+            return Err(Error::Checksum);
+        }
+
         let payload_len = packet.total_len() as usize - packet.header_len() as usize;
         if packet.payload().len() < payload_len {
             return Err(Error::Truncated);
@@ -202,5 +210,33 @@ impl Repr {
             dst_addr: packet.dst_addr(),
             payload_len: payload_len,
         })
+    }
+}
+
+pub mod checksum {
+    use byteorder::{ByteOrder, NetworkEndian};
+
+    fn propogate_carries(word: u32) -> u16 {
+        let mut word = word;
+        while (word >> 16) != 0 {
+            word = (word & 0xFFFF) + (word >> 16);
+        }
+        word as u16
+    }
+
+    pub fn compute(data: &[u8], start: u32) -> u16 {
+        let mut sum = start;
+        let mut i = 0;
+        while i < data.len() {
+            let word = if i + 2 <= data.len() {
+                NetworkEndian::read_u16(&data[i..i + 2]) as u32
+            } else {
+                (data[i] as u32) << 8
+            };
+            sum += word;
+            i += 2;
+        }
+
+        !propogate_carries(sum)
     }
 }

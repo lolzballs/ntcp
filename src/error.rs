@@ -5,4 +5,5 @@ pub enum Error {
     Unrecognized,
     Fragmented,
     UnknownProtocol,
+    Checksum,
 }
