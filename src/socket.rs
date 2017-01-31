@@ -62,6 +62,10 @@ impl Socket {
             if tcprepr.dst_port == self.endpoint.port {
                 println!("{:?}", ip);
                 println!("{:?}", tcp);
+
+                if tcp.flag_syn() && !tcp.flag_ack() {
+                    println!("HANDSHAKE");
+                }
                 return Ok(PacketBuffer::new(tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port),
                                             tcp.payload()));
             }
