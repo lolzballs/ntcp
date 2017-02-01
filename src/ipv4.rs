@@ -23,8 +23,8 @@ impl Address {
     }
 }
 
-pub struct Packet<'a> {
-    buffer: &'a [u8],
+pub struct Packet<T: AsRef<[u8]>> {
+    buffer: T,
 }
 
 mod field {
@@ -42,9 +42,9 @@ mod field {
     pub const DST_ADDR: Field = 16..20;
 }
 
-impl<'a> Packet<'a> {
-    pub fn new(buffer: &'a [u8]) -> Result<Self, Error> {
-        let len = buffer.len();
+impl<T: AsRef<[u8]>> Packet<T> {
+    pub fn new(buffer: T) -> Result<Self, Error> {
+        let len = buffer.as_ref().len();
         if len < field::DST_ADDR.end {
             Err(Error::Truncated)
         } else {
@@ -143,18 +143,21 @@ impl<'a> Packet<'a> {
         Address::from_bytes(&buf[field::DST_ADDR])
     }
 
-    #[inline]
-    pub fn payload(&self) -> &[u8] {
-        let buf = self.buffer.as_ref();
-        &buf[self.header_len() as usize..]
-    }
-
     pub fn checksum_valid(&self) -> bool {
-        checksum::compute(&self.buffer[..self.header_len() as usize], 0) == 0
+        let buf = self.buffer.as_ref();
+        checksum::compute(&buf[..self.header_len() as usize], 0) == 0
     }
 }
 
-impl<'a> fmt::Debug for Packet<'a> {
+impl<'a, T: AsRef<[u8]> + ?Sized> Packet<&'a T> {
+    #[inline]
+    pub fn payload(&self) -> &'a [u8] {
+        let buf = self.buffer.as_ref();
+        &buf[self.header_len() as usize..]
+    }
+}
+
+impl<T: AsRef<[u8]>> fmt::Debug for Packet<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("Ipv4Packet")
             .field("dscp", &self.dscp())
@@ -179,7 +182,7 @@ pub struct Repr {
 }
 
 impl Repr {
-    pub fn parse(packet: &Packet) -> Result<Self, Error> {
+    pub fn parse<T: AsRef<[u8]> + ?Sized>(packet: &Packet<&T>) -> Result<Self, Error> {
         if packet.version() != 4 {
             return Err(Error::Malformed);
         }
@@ -202,9 +205,6 @@ impl Repr {
 
         let payload_len = packet.total_len() as usize - packet.header_len() as usize;
         if packet.payload().len() < payload_len {
-            println!("calculated: {}, actual: {}",
-                     payload_len,
-                     packet.payload().len());
             return Err(Error::Truncated);
         }
 
