@@ -18,8 +18,8 @@ impl Endpoint {
     }
 }
 
-pub struct Packet<'a> {
-    buffer: &'a [u8],
+pub struct Packet<T: AsRef<[u8]>> {
+    buffer: T,
 }
 
 mod field {
@@ -35,18 +35,13 @@ mod field {
     pub const URGENT: Field = 18..20;
 }
 
-impl<'a> Packet<'a> {
-    pub fn new(buffer: &'a [u8]) -> Result<Self, Error> {
-        let len = buffer.len();
+impl<T: AsRef<[u8]>> Packet<T> {
+    pub fn new(buffer: T) -> Result<Self, Error> {
+        let len = buffer.as_ref().len();
         if len < field::URGENT.end {
             Err(Error::Truncated)
         } else {
-            let packet = Packet { buffer: buffer };
-            if len < packet.data_offset() as usize {
-                Err(Error::Truncated)
-            } else {
-                Ok(packet)
-            }
+            Ok(Packet { buffer: buffer })
         }
     }
 
@@ -135,36 +130,198 @@ impl<'a> Packet<'a> {
     }
 
     #[inline]
-    pub fn payload(&self) -> &[u8] {
-        let len = (self.data_offset()) as usize;
+    pub fn window_size(&self) -> u16 {
         let buf = self.buffer.as_ref();
-        &buf[len..]
+        NetworkEndian::read_u16(&buf[field::WINDOW_SIZE])
+    }
+
+    #[inline]
+    pub fn checksum(&self) -> u16 {
+        let buf = self.buffer.as_ref();
+        NetworkEndian::read_u16(&buf[field::CHECKSUM])
+    }
+
+    #[inline]
+    pub fn urgent(&self) -> u16 {
+        let buf = self.buffer.as_ref();
+        NetworkEndian::read_u16(&buf[field::URGENT])
     }
 
     pub fn checksum_valid(&self, src_addr: &ipv4::Address, dst_addr: &ipv4::Address) -> bool {
         use ipv4::checksum;
-        checksum::compute(&self.buffer,
-                          checksum::pseudo_header(src_addr, dst_addr, self.buffer.len() as u16)) ==
+        let buf = self.buffer.as_ref();
+        checksum::compute(&buf,
+                          checksum::pseudo_header(src_addr, dst_addr, buf.len() as u16)) ==
         0
     }
 }
 
-impl<'a> fmt::Debug for Packet<'a> {
+impl<'a, T: AsRef<[u8]> + ?Sized> Packet<&'a T> {
+    #[inline]
+    pub fn payload(&self) -> &'a [u8] {
+        let len = (self.data_offset()) as usize;
+        let buf = self.buffer.as_ref();
+        &buf[len..]
+    }
+}
+
+impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
+    #[inline]
+    pub fn set_src_port(&mut self, port: u16) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::SRC_PORT], port);
+    }
+
+    #[inline]
+    pub fn set_dst_port(&mut self, port: u16) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::DST_PORT], port);
+    }
+
+    #[inline]
+    pub fn set_seq_num(&mut self, value: u32) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u32(&mut buf[field::SEQ_NUM], value);
+    }
+
+    #[inline]
+    pub fn set_ack_num(&mut self, value: u32) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u32(&mut buf[field::ACK_NUM], value);
+    }
+
+    #[inline]
+    pub fn clear_flags(&mut self) {
+        let offset = self.data_offset() as u16;
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::OFF_FLG], offset << 12)
+    }
+
+    #[inline]
+    pub fn set_flag_ns(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x01;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x01;
+        }
+    }
+
+    #[inline]
+    pub fn set_flag_cwr(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x80;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x80;
+        }
+    }
+
+    #[inline]
+    pub fn set_flag_ece(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x40;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x40;
+        }
+    }
+
+    #[inline]
+    pub fn set_flag_urg(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x20;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x20;
+        }
+    }
+
+    #[inline]
+    pub fn set_flag_ack(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x10;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x10;
+        }
+    }
+
+    #[inline]
+    pub fn set_flag_psh(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x08;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x08;
+        }
+    }
+
+    #[inline]
+    pub fn set_flag_rst(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x04;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x04;
+        }
+    }
+
+    #[inline]
+    pub fn set_flag_syn(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x02;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x02;
+        }
+    }
+
+    #[inline]
+    pub fn set_flag_fin(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        if flag {
+            buf[field::OFF_FLG.start] |= 0x01;
+        } else {
+            buf[field::OFF_FLG.start] &= !0x01;
+        }
+    }
+
+    #[inline]
+    pub fn set_window_size(&mut self, value: u16) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::WINDOW_SIZE], value);
+    }
+
+    #[inline]
+    pub fn set_checksum(&mut self, value: u16) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::CHECKSUM], value);
+    }
+
+    #[inline]
+    pub fn set_urgent(&mut self, value: u16) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::URGENT], value);
+    }
+}
+
+impl<T: AsRef<[u8]>> fmt::Debug for Packet<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("TcpPacket")
-            .field("src_port", &self.src_port())
-            .field("dst_port", &self.dst_port())
-            .field("seq_num", &self.seq_num())
-            .field("ack_num", &self.ack_num())
-            .field("ns", &self.flag_ns())
-            .field("cwr", &self.flag_cwr())
-            .field("ece", &self.flag_ece())
-            .field("urg", &self.flag_urg())
-            .field("ack", &self.flag_ack())
-            .field("psh", &self.flag_psh())
-            .field("rst", &self.flag_rst())
-            .field("syn", &self.flag_syn())
-            .field("fin", &self.flag_fin())
+            .field("src_port", &mut self.src_port())
+            .field("dst_port", &mut self.dst_port())
+            .field("seq_num", &mut self.seq_num())
+            .field("ack_num", &mut self.ack_num())
+            .field("ns", &mut self.flag_ns())
+            .field("cwr", &mut self.flag_cwr())
+            .field("ece", &mut self.flag_ece())
+            .field("urg", &mut self.flag_urg())
+            .field("ack", &mut self.flag_ack())
+            .field("psh", &mut self.flag_psh())
+            .field("rst", &mut self.flag_rst())
+            .field("syn", &mut self.flag_syn())
+            .field("fin", &mut self.flag_fin())
             .finish()
     }
 }
@@ -177,10 +334,12 @@ pub struct Repr<'a> {
 }
 
 impl<'a> Repr<'a> {
-    pub fn parse(packet: &'a Packet,
-                 src_addr: &ipv4::Address,
-                 dst_addr: &ipv4::Address)
-                 -> Result<Self, Error> {
+    pub fn parse<T: ?Sized>(packet: &Packet<&'a T>,
+                            src_addr: &ipv4::Address,
+                            dst_addr: &ipv4::Address)
+                            -> Result<Self, Error>
+        where T: AsRef<[u8]>
+    {
         if packet.src_port() == 0 {
             return Err(Error::Malformed);
         }

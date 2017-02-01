@@ -51,7 +51,7 @@ impl Socket {
                     continue;
                 }
             };
-            let tcp = tcp::Packet::new(&ip.payload()).unwrap();
+            let tcp = tcp::Packet::new(ip.payload()).unwrap();
             let tcprepr = match tcp::Repr::parse(&tcp, &iprepr.src_addr, &iprepr.dst_addr) {
                 Ok(repr) => repr,
                 Err(error) => {
