@@ -72,13 +72,13 @@ impl<T: AsRef<[u8]>> Packet<T> {
     #[inline]
     pub fn dscp(&self) -> u8 {
         let buf = self.buffer.as_ref();
-        buf[field::VER_IHL] >> 2
+        buf[field::DSCP_ECN] >> 2
     }
 
     #[inline]
     pub fn ecn(&self) -> u8 {
         let buf = self.buffer.as_ref();
-        buf[field::VER_IHL] & 0b11
+        buf[field::DSCP_ECN] & 0b11
     }
 
     #[inline]
@@ -154,6 +154,90 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Packet<&'a T> {
     pub fn payload(&self) -> &'a [u8] {
         let buf = self.buffer.as_ref();
         &buf[self.header_len() as usize..]
+    }
+}
+
+impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
+    #[inline]
+    pub fn set_version(&mut self, version: u8) {
+        let mut buf = self.buffer.as_mut();
+        buf[field::VER_IHL] = (buf[field::VER_IHL] & 0x0F) | ((version & 0x0F) << 4);
+    }
+
+    #[inline]
+    pub fn set_header_len(&mut self, length: u8) {
+        let mut buf = self.buffer.as_mut();
+        buf[field::VER_IHL] = (buf[field::VER_IHL] & 0xF0) | ((length / 4) & 0x0F);
+    }
+
+    #[inline]
+    pub fn set_dscp(&mut self, value: u8) {
+        let mut buf = self.buffer.as_mut();
+        buf[field::DSCP_ECN] = (buf[field::DSCP_ECN] & 0x03) | ((value << 2) & 0xFC);
+    }
+
+    #[inline]
+    pub fn set_ecn(&mut self, value: u8) {
+        let mut buf = self.buffer.as_mut();
+        buf[field::DSCP_ECN] = (buf[field::DSCP_ECN] & 0xFC) | (value & 0x03);
+    }
+
+    #[inline]
+    pub fn set_total_len(&mut self, length: u16) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::LENGTH], length);
+    }
+
+    #[inline]
+    pub fn set_identification(&mut self, value: u16) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::ID], value)
+    }
+
+    /// Don't Fragment (DF) flag
+    #[inline]
+    pub fn set_flag_df(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        buf[field::FLG_OFF.start] = (buf[field::FLG_OFF.start] & !0x40) |
+                                    ((if flag { 1 << 7 } else { 0 }));
+    }
+
+    /// More Fragments (MF) flag
+    #[inline]
+    pub fn set_flag_mf(&mut self, flag: bool) {
+        let mut buf = self.buffer.as_mut();
+        buf[field::FLG_OFF.start] = (buf[field::FLG_OFF.start] & !0x20) |
+                                    ((if flag { 1 << 6 } else { 0 }));
+    }
+
+    #[inline]
+    pub fn set_ttl(&mut self, value: u8) {
+        let mut buf = self.buffer.as_mut();
+        buf[field::TTL] = value;
+    }
+
+    #[inline]
+    pub fn set_protocol(&mut self, protocol: u8) {
+        let mut buf = self.buffer.as_mut();
+        buf[field::PROTOCOL] = protocol;
+    }
+
+    #[inline]
+    pub fn set_checksum(&mut self, value: u16) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u16(&mut buf[field::CHECKSUM], value);
+    }
+
+    #[inline]
+    pub fn set_src_addr(&mut self, addr: &Address) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u32(&mut buf[field::SRC_ADDR], addr.as_beu32());
+    }
+
+    #[inline]
+    pub fn set_dst_addr(&mut self, addr: &Address) {
+        let mut buf = self.buffer.as_mut();
+        NetworkEndian::write_u32(&mut buf[field::DST_ADDR], addr.as_beu32());
     }
 }
 
