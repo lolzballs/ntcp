@@ -3,7 +3,7 @@ use super::error::Error;
 use super::ipv4;
 use std::fmt;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Endpoint {
     pub addr: ipv4::Address,
     pub port: u16,
@@ -19,7 +19,7 @@ impl Endpoint {
 }
 
 pub struct Packet<T: AsRef<[u8]>> {
-    buffer: T,
+    pub buffer: T,
 }
 
 mod field {
@@ -84,49 +84,49 @@ impl<T: AsRef<[u8]>> Packet<T> {
     #[inline]
     pub fn flag_cwr(&self) -> bool {
         let buf = self.buffer.as_ref();
-        buf[field::OFF_FLG.end] & 0x80 != 0
+        buf[field::OFF_FLG.end - 1] & 0x80 != 0
     }
 
     #[inline]
     pub fn flag_ece(&self) -> bool {
         let buf = self.buffer.as_ref();
-        buf[field::OFF_FLG.end] & 0x40 != 0
+        buf[field::OFF_FLG.end - 1] & 0x40 != 0
     }
 
     #[inline]
     pub fn flag_urg(&self) -> bool {
         let buf = self.buffer.as_ref();
-        buf[field::OFF_FLG.end] & 0x20 != 0
+        buf[field::OFF_FLG.end - 1] & 0x20 != 0
     }
 
     #[inline]
     pub fn flag_ack(&self) -> bool {
         let buf = self.buffer.as_ref();
-        buf[field::OFF_FLG.end] & 0x10 != 0
+        buf[field::OFF_FLG.end - 1] & 0x10 != 0
     }
 
     #[inline]
     pub fn flag_psh(&self) -> bool {
         let buf = self.buffer.as_ref();
-        buf[field::OFF_FLG.end] & 0x08 != 0
+        buf[field::OFF_FLG.end - 1] & 0x08 != 0
     }
 
     #[inline]
     pub fn flag_rst(&self) -> bool {
         let buf = self.buffer.as_ref();
-        buf[field::OFF_FLG.end] & 0x04 != 0
+        buf[field::OFF_FLG.end - 1] & 0x04 != 0
     }
 
     #[inline]
     pub fn flag_syn(&self) -> bool {
         let buf = self.buffer.as_ref();
-        buf[field::OFF_FLG.end] & 0x02 != 0
+        buf[field::OFF_FLG.end - 1] & 0x02 != 0
     }
 
     #[inline]
     pub fn flag_fin(&self) -> bool {
         let buf = self.buffer.as_ref();
-        buf[field::OFF_FLG.end] & 0x01 != 0
+        buf[field::OFF_FLG.end - 1] & 0x01 != 0
     }
 
     #[inline]
@@ -191,10 +191,17 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     }
 
     #[inline]
-    pub fn clear_flags(&mut self) {
-        let offset = self.data_offset() as u16;
+    pub fn set_data_offset(&mut self, offset: u8) {
         let mut buf = self.buffer.as_mut();
-        NetworkEndian::write_u16(&mut buf[field::OFF_FLG], offset << 12)
+        buf[field::OFF_FLG.start] = (buf[field::OFF_FLG.start] & 0x0F) | ((offset / 4) << 4);
+    }
+
+    #[inline]
+    pub fn clear_flags(&mut self) {
+        let offset = self.data_offset();
+        let mut buf = self.buffer.as_mut();
+        buf[field::OFF_FLG.start] = (offset / 4) << 4;
+        buf[field::OFF_FLG.end - 1] = 0;
     }
 
     #[inline]
@@ -211,9 +218,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_cwr(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         if flag {
-            buf[field::OFF_FLG.start] |= 0x80;
+            buf[field::OFF_FLG.end - 1] |= 0x80;
         } else {
-            buf[field::OFF_FLG.start] &= !0x80;
+            buf[field::OFF_FLG.end - 1] &= !0x80;
         }
     }
 
@@ -221,9 +228,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_ece(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         if flag {
-            buf[field::OFF_FLG.start] |= 0x40;
+            buf[field::OFF_FLG.end - 1] |= 0x40;
         } else {
-            buf[field::OFF_FLG.start] &= !0x40;
+            buf[field::OFF_FLG.end - 1] &= !0x40;
         }
     }
 
@@ -231,9 +238,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_urg(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         if flag {
-            buf[field::OFF_FLG.start] |= 0x20;
+            buf[field::OFF_FLG.end - 1] |= 0x20;
         } else {
-            buf[field::OFF_FLG.start] &= !0x20;
+            buf[field::OFF_FLG.end - 1] &= !0x20;
         }
     }
 
@@ -241,9 +248,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_ack(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         if flag {
-            buf[field::OFF_FLG.start] |= 0x10;
+            buf[field::OFF_FLG.end - 1] |= 0x10;
         } else {
-            buf[field::OFF_FLG.start] &= !0x10;
+            buf[field::OFF_FLG.end - 1] &= !0x10;
         }
     }
 
@@ -251,9 +258,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_psh(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         if flag {
-            buf[field::OFF_FLG.start] |= 0x08;
+            buf[field::OFF_FLG.end - 1] |= 0x08;
         } else {
-            buf[field::OFF_FLG.start] &= !0x08;
+            buf[field::OFF_FLG.end - 1] &= !0x08;
         }
     }
 
@@ -261,9 +268,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_rst(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         if flag {
-            buf[field::OFF_FLG.start] |= 0x04;
+            buf[field::OFF_FLG.end - 1] |= 0x04;
         } else {
-            buf[field::OFF_FLG.start] &= !0x04;
+            buf[field::OFF_FLG.end - 1] &= !0x04;
         }
     }
 
@@ -271,9 +278,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_syn(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         if flag {
-            buf[field::OFF_FLG.start] |= 0x02;
+            buf[field::OFF_FLG.end - 1] |= 0x02;
         } else {
-            buf[field::OFF_FLG.start] &= !0x02;
+            buf[field::OFF_FLG.end - 1] &= !0x02;
         }
     }
 
@@ -281,9 +288,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_fin(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         if flag {
-            buf[field::OFF_FLG.start] |= 0x01;
+            buf[field::OFF_FLG.end - 1] |= 0x01;
         } else {
-            buf[field::OFF_FLG.start] &= !0x01;
+            buf[field::OFF_FLG.end - 1] &= !0x01;
         }
     }
 
@@ -304,24 +311,36 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
         let mut buf = self.buffer.as_mut();
         NetworkEndian::write_u16(&mut buf[field::URGENT], value);
     }
+
+    #[inline]
+    pub fn fill_checksum(&mut self, src_addr: &ipv4::Address, dst_addr: &ipv4::Address) {
+        use ipv4::checksum;
+        let sum = {
+            let buf = self.buffer.as_ref();
+            checksum::compute(&buf,
+                              checksum::pseudo_header(src_addr, dst_addr, buf.len() as u16))
+        };
+
+        self.set_checksum(sum);
+    }
 }
 
 impl<T: AsRef<[u8]>> fmt::Debug for Packet<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("TcpPacket")
-            .field("src_port", &mut self.src_port())
-            .field("dst_port", &mut self.dst_port())
-            .field("seq_num", &mut self.seq_num())
-            .field("ack_num", &mut self.ack_num())
-            .field("ns", &mut self.flag_ns())
-            .field("cwr", &mut self.flag_cwr())
-            .field("ece", &mut self.flag_ece())
-            .field("urg", &mut self.flag_urg())
-            .field("ack", &mut self.flag_ack())
-            .field("psh", &mut self.flag_psh())
-            .field("rst", &mut self.flag_rst())
-            .field("syn", &mut self.flag_syn())
-            .field("fin", &mut self.flag_fin())
+            .field("src_port", &self.src_port())
+            .field("dst_port", &self.dst_port())
+            .field("seq_num", &self.seq_num())
+            .field("ack_num", &self.ack_num())
+            .field("ns", &self.flag_ns())
+            .field("cwr", &self.flag_cwr())
+            .field("ece", &self.flag_ece())
+            .field("urg", &self.flag_urg())
+            .field("ack", &self.flag_ack())
+            .field("psh", &self.flag_psh())
+            .field("rst", &self.flag_rst())
+            .field("syn", &self.flag_syn())
+            .field("fin", &self.flag_fin())
             .finish()
     }
 }

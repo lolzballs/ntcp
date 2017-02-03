@@ -34,6 +34,45 @@ impl Socket {
         }
     }
 
+    fn send_syn_ack(&self, recv: &tcp::Packet<&[u8]>, endpoint: tcp::Endpoint) {
+        let mut buf = [0; 50];
+        let src_addr = ipv4::Address::from_bytes(&[127, 0, 0, 1]);
+        let len = {
+            let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
+            {
+                let iprepr = ipv4::Repr {
+                    src_addr: ipv4::Address::from_bytes(&[127, 0, 0, 1]),
+                    dst_addr: endpoint.addr,
+                    payload_len: 20,
+                };
+                iprepr.send(&mut ip);
+            }
+            {
+                let mut ippayload = ip.payload_mut();
+                let mut tcp = tcp::Packet::new(ippayload).unwrap();
+                tcp.set_src_port(self.endpoint.port);
+                tcp.set_dst_port(endpoint.port);
+                tcp.set_data_offset(20);
+
+                tcp.set_ack_num(recv.seq_num() + 1);
+                tcp.set_seq_num(123123);
+
+                tcp.set_flag_syn(true);
+                tcp.set_flag_ack(true);
+
+                tcp.fill_checksum(&self.endpoint.addr, &endpoint.addr);
+
+                println!("{:?}", tcp);
+            }
+
+            let total_len = ip.total_len() as usize;
+            total_len
+        };
+
+        println!("{:?}", &buf[..len]);
+        self.raw.send(endpoint, &buf[..len]).unwrap();
+    }
+
     pub fn recv(&self) -> io::Result<PacketBuffer> {
         loop {
             let mut buf = [0; RECV_BUF_LEN];
@@ -62,12 +101,14 @@ impl Socket {
             if tcprepr.dst_port == self.endpoint.port {
                 println!("{:?}", ip);
                 println!("{:?}", tcp);
+                let endpoint = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
 
                 if tcp.flag_syn() && !tcp.flag_ack() {
                     println!("HANDSHAKE");
+                    self.send_syn_ack(&tcp, endpoint);
+                } else {
+                    return Ok(PacketBuffer::new(endpoint, tcp.payload()));
                 }
-                return Ok(PacketBuffer::new(tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port),
-                                            tcp.payload()));
             }
         }
     }

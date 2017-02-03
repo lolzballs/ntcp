@@ -67,7 +67,7 @@ impl RawSocket {
         let addr = libc::sockaddr_in {
             sin_family: libc::AF_INET as u16,
             sin_port: dest.port.to_be(),
-            sin_addr: libc::in_addr { s_addr: dest.addr.as_beu32() },
+            sin_addr: libc::in_addr { s_addr: dest.addr.as_u32().to_be() },
             sin_zero: [0; 8],
         };
 

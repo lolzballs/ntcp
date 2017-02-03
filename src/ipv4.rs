@@ -4,7 +4,7 @@ use std::fmt;
 
 const TCP_PROTOCOL: u8 = 6;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Address([u8; 4]);
 
 impl Address {
@@ -18,7 +18,7 @@ impl Address {
         &self.0
     }
 
-    pub fn as_beu32(&self) -> u32 {
+    pub fn as_u32(&self) -> u32 {
         NetworkEndian::read_u32(&self.0)
     }
 }
@@ -231,19 +231,29 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     #[inline]
     pub fn set_src_addr(&mut self, addr: &Address) {
         let mut buf = self.buffer.as_mut();
-        NetworkEndian::write_u32(&mut buf[field::SRC_ADDR], addr.as_beu32());
+        NetworkEndian::write_u32(&mut buf[field::SRC_ADDR], addr.as_u32());
     }
 
     #[inline]
     pub fn set_dst_addr(&mut self, addr: &Address) {
         let mut buf = self.buffer.as_mut();
-        NetworkEndian::write_u32(&mut buf[field::DST_ADDR], addr.as_beu32());
+        NetworkEndian::write_u32(&mut buf[field::DST_ADDR], addr.as_u32());
+    }
+}
+
+impl<'a, T: AsRef<[u8]> + AsMut<[u8]> + ?Sized> Packet<&'a mut T> {
+    #[inline]
+    pub fn payload_mut(&mut self) -> &mut [u8] {
+        let len = self.header_len() as usize;
+        let mut buf = self.buffer.as_mut();
+        &mut buf[len..]
     }
 }
 
 impl<T: AsRef<[u8]>> fmt::Debug for Packet<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("Ipv4Packet")
+            .field("ihl", &self.header_len())
             .field("dscp", &self.dscp())
             .field("ecn", &self.ecn())
             .field("identification", &self.identification())
@@ -298,6 +308,22 @@ impl Repr {
             payload_len: payload_len,
         })
     }
+
+    pub fn send<T: AsRef<[u8]> + AsMut<[u8]>>(&self, packet: &mut Packet<T>) {
+        packet.set_version(4);
+        packet.set_header_len(field::DST_ADDR.end as u8);
+        packet.set_dscp(0);
+        packet.set_ecn(0);
+        let len = packet.header_len() as u16 + self.payload_len as u16;
+        packet.set_total_len(len);
+        packet.set_identification(0);
+        packet.set_flag_df(true);
+        packet.set_flag_mf(false);
+        packet.set_ttl(64);
+        packet.set_protocol(TCP_PROTOCOL);
+        packet.set_src_addr(&self.src_addr);
+        packet.set_dst_addr(&self.dst_addr);
+    }
 }
 
 pub mod checksum {
@@ -329,8 +355,8 @@ pub mod checksum {
     }
 
     pub fn pseudo_header(src_addr: &Address, dst_addr: &Address, length: u16) -> u32 {
-        let src = src_addr.as_beu32().to_be();
-        let dst = dst_addr.as_beu32().to_be();
+        let src = src_addr.as_u32().to_le();
+        let dst = dst_addr.as_u32().to_le();
 
         (src >> 16) + (src & 0xFFFF) + (dst >> 16) + (dst & 0xFFFF) + (length.to_be() as u32) +
         (TCP_PROTOCOL as u32)
