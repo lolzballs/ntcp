@@ -5,5 +5,4 @@ authors = ["Benjamin Cheng <ben@bcheng.cf>"]
 
 [dependencies]
 byteorder = "1"
-errno = "0.2.1"
 libc = "0.2"

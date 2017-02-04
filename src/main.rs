@@ -1,6 +1,5 @@
 extern crate byteorder;
 extern crate core;
-extern crate errno;
 extern crate libc;
 
 use std::io::Write;
