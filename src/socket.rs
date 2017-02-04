@@ -48,8 +48,8 @@ impl Socket {
                 iprepr.send(&mut ip);
             }
             {
-                let mut ippayload = &mut ip.payload_mut()[..iprepr.payload_len];
-                let mut tcp = tcp::Packet::new(ippayload).unwrap();
+                let mut tcp = tcp::Packet::new(&mut ip.payload_mut()[..iprepr.payload_len])
+                    .unwrap();
                 tcp.set_src_port(self.endpoint.port);
                 tcp.set_dst_port(endpoint.port);
                 tcp.set_data_offset(20);

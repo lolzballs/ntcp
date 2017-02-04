@@ -2,8 +2,6 @@ extern crate byteorder;
 extern crate core;
 extern crate libc;
 
-use std::io::Write;
-
 mod error;
 mod ipv4;
 mod tcp;
