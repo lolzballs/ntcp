@@ -315,6 +315,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     #[inline]
     pub fn fill_checksum(&mut self, src_addr: &ipv4::Address, dst_addr: &ipv4::Address) {
         use ipv4::checksum;
+        self.set_checksum(0);
+
         let sum = {
             let buf = self.buffer.as_ref();
             checksum::compute(&buf,

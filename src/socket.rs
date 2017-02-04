@@ -38,17 +38,17 @@ impl Socket {
         let mut buf = [0; 50];
         let src_addr = ipv4::Address::from_bytes(&[127, 0, 0, 1]);
         let len = {
+            let iprepr = ipv4::Repr {
+                src_addr: ipv4::Address::from_bytes(&[127, 0, 0, 1]),
+                dst_addr: endpoint.addr,
+                payload_len: 20,
+            };
             let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
             {
-                let iprepr = ipv4::Repr {
-                    src_addr: ipv4::Address::from_bytes(&[127, 0, 0, 1]),
-                    dst_addr: endpoint.addr,
-                    payload_len: 20,
-                };
                 iprepr.send(&mut ip);
             }
             {
-                let mut ippayload = ip.payload_mut();
+                let mut ippayload = &mut ip.payload_mut()[..iprepr.payload_len];
                 let mut tcp = tcp::Packet::new(ippayload).unwrap();
                 tcp.set_src_port(self.endpoint.port);
                 tcp.set_dst_port(endpoint.port);
@@ -60,7 +60,7 @@ impl Socket {
                 tcp.set_flag_syn(true);
                 tcp.set_flag_ack(true);
 
-                tcp.fill_checksum(&self.endpoint.addr, &endpoint.addr);
+                tcp.fill_checksum(&src_addr, &endpoint.addr);
 
                 println!("{:?}", tcp);
             }
@@ -90,7 +90,7 @@ impl Socket {
                     continue;
                 }
             };
-            let tcp = tcp::Packet::new(ip.payload()).unwrap();
+            let tcp = tcp::Packet::new(&ip.payload()[..iprepr.payload_len]).unwrap();
             let tcprepr = match tcp::Repr::parse(&tcp, &iprepr.src_addr, &iprepr.dst_addr) {
                 Ok(repr) => repr,
                 Err(error) => {

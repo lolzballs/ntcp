@@ -244,9 +244,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
 impl<'a, T: AsRef<[u8]> + AsMut<[u8]> + ?Sized> Packet<&'a mut T> {
     #[inline]
     pub fn payload_mut(&mut self) -> &mut [u8] {
-        let len = self.header_len() as usize;
+        let start = self.header_len() as usize;
         let mut buf = self.buffer.as_mut();
-        &mut buf[len..]
+        &mut buf[start..]
     }
 }
 
@@ -343,22 +343,23 @@ pub mod checksum {
         let mut i = 0;
         while i < data.len() {
             let word = if i + 2 <= data.len() {
-                NetworkEndian::read_u16(&data[i..i + 2]) as u32
+                NetworkEndian::read_u16(&data[i..i + 2]).to_be() as u32
             } else {
-                (data[i] as u32) << 8
+                (data[i] as u32)
             };
             sum += word;
             i += 2;
         }
+        sum = sum.to_be();
 
         !propogate_carries(sum)
     }
 
     pub fn pseudo_header(src_addr: &Address, dst_addr: &Address, length: u16) -> u32 {
-        let src = src_addr.as_u32().to_le();
-        let dst = dst_addr.as_u32().to_le();
+        let src = src_addr.as_u32().to_be();
+        let dst = dst_addr.as_u32().to_be();
 
         (src >> 16) + (src & 0xFFFF) + (dst >> 16) + (dst & 0xFFFF) + (length.to_be() as u32) +
-        (TCP_PROTOCOL as u32)
+        ((TCP_PROTOCOL as u16).to_be() as u32)
     }
 }
