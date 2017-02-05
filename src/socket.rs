@@ -36,13 +36,13 @@ impl Socket {
         }
     }
 
-    fn send_syn_ack(&self, recv: &tcp::Packet<&[u8]>, endpoint: tcp::Endpoint) {
+    fn send_syn_ack(&self, recv: &tcp::Packet<&[u8]>, src: tcp::Endpoint, dst: tcp::Endpoint) {
         let mut buf = [0; 50];
-        let src_addr = ipv4::Address::from_bytes(&[127, 0, 0, 1]);
+        let src_addr = src.addr;
         let len = {
             let iprepr = ipv4::Repr {
-                src_addr: ipv4::Address::from_bytes(&[127, 0, 0, 1]),
-                dst_addr: endpoint.addr,
+                src_addr: src.addr,
+                dst_addr: dst.addr,
                 payload_len: 20,
             };
             let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
@@ -54,25 +54,22 @@ impl Socket {
                     .unwrap();
 
                 let tcprepr = tcp::Repr {
-                    src_port: self.endpoint.port,
-                    dst_port: endpoint.port,
+                    src_port: src.port,
+                    dst_port: dst.port,
                     seq: 123123,
                     ack: Some(recv.seq_num() + 1),
                     control: tcp::Control::Syn,
                     payload: &[],
                 };
 
-                tcprepr.emit(&mut tcp, &src_addr, &endpoint.addr);
-
-                println!("{:?}", tcprepr);
-                println!("{:?}", tcp);
+                tcprepr.emit(&mut tcp, &src.addr, &dst.addr);
             }
 
             let total_len = ip.total_len() as usize;
             total_len
         };
 
-        self.raw.send(endpoint, &buf[..len]).unwrap();
+        self.raw.send(dst, &buf[..len]).unwrap();
     }
 
     pub fn recv(&self) -> io::Result<PacketBuffer> {
@@ -103,11 +100,19 @@ impl Socket {
             if tcprepr.dst_port == self.endpoint.port {
                 let endpoint = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
 
-                if tcprepr.control == tcp::Control::Syn && tcprepr.ack.is_none() {
-                    println!("HANDSHAKE");
-                    self.send_syn_ack(&tcp, endpoint);
-                } else {
-                    return Ok(PacketBuffer::new(endpoint, tcp.payload()));
+                match tcprepr.control {
+                    tcp::Control::Syn => {
+                        if tcprepr.ack.is_none() {
+                            self.send_syn_ack(&tcp,
+                                              tcp::Endpoint::new(iprepr.dst_addr,
+                                                                 tcprepr.dst_port),
+                                              endpoint);
+                        }
+                    }
+                    tcp::Control::None => {
+                        return Ok(PacketBuffer::new(endpoint, tcp.payload()));
+                    }
+                    _ => println!("{:?}", tcp),
                 }
             }
         }
