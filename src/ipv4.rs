@@ -1,6 +1,8 @@
-use byteorder::{ByteOrder, NetworkEndian};
 use super::error::Error;
+
 use std::fmt;
+
+use byteorder::{ByteOrder, NetworkEndian};
 
 const TCP_PROTOCOL: u8 = 6;
 

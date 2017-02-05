@@ -1,7 +1,9 @@
 use super::ipv4;
 use super::tcp;
 use super::platform;
+
 use std::io;
+
 use error::Error;
 
 const RECV_BUF_LEN: usize = 2048;
@@ -50,18 +52,19 @@ impl Socket {
             {
                 let mut tcp = tcp::Packet::new(&mut ip.payload_mut()[..iprepr.payload_len])
                     .unwrap();
-                tcp.set_src_port(self.endpoint.port);
-                tcp.set_dst_port(endpoint.port);
-                tcp.set_data_offset(20);
 
-                tcp.set_ack_num(recv.seq_num() + 1);
-                tcp.set_seq_num(123123);
+                let tcprepr = tcp::Repr {
+                    src_port: self.endpoint.port,
+                    dst_port: endpoint.port,
+                    seq: 123123,
+                    ack: Some(recv.seq_num() + 1),
+                    control: tcp::Control::Syn,
+                    payload: &[],
+                };
 
-                tcp.set_flag_syn(true);
-                tcp.set_flag_ack(true);
+                tcprepr.emit(&mut tcp, &src_addr, &endpoint.addr);
 
-                tcp.fill_checksum(&src_addr, &endpoint.addr);
-
+                println!("{:?}", tcprepr);
                 println!("{:?}", tcp);
             }
 
@@ -69,7 +72,6 @@ impl Socket {
             total_len
         };
 
-        println!("{:?}", &buf[..len]);
         self.raw.send(endpoint, &buf[..len]).unwrap();
     }
 
@@ -99,11 +101,9 @@ impl Socket {
                 }
             };
             if tcprepr.dst_port == self.endpoint.port {
-                println!("{:?}", ip);
-                println!("{:?}", tcp);
                 let endpoint = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
 
-                if tcp.flag_syn() && !tcp.flag_ack() {
+                if tcprepr.control == tcp::Control::Syn && tcprepr.ack.is_none() {
                     println!("HANDSHAKE");
                     self.send_syn_ack(&tcp, endpoint);
                 } else {

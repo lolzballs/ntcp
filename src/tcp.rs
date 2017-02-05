@@ -1,7 +1,9 @@
-use byteorder::{ByteOrder, NetworkEndian};
 use super::error::Error;
 use super::ipv4;
+
 use std::fmt;
+
+use byteorder::{ByteOrder, NetworkEndian};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Endpoint {
@@ -327,6 +329,15 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     }
 }
 
+impl<'a, T: AsRef<[u8]> + AsMut<[u8]> + ?Sized> Packet<&'a mut T> {
+    #[inline]
+    pub fn payload(&mut self) -> &mut [u8] {
+        let len = (self.data_offset()) as usize;
+        let mut buf = self.buffer.as_mut();
+        &mut buf[len..]
+    }
+}
+
 impl<T: AsRef<[u8]>> fmt::Debug for Packet<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("TcpPacket")
@@ -347,10 +358,21 @@ impl<T: AsRef<[u8]>> fmt::Debug for Packet<T> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Control {
+    None,
+    Syn,
+    Fin,
+    Rst,
+}
+
 #[derive(Debug)]
 pub struct Repr<'a> {
     pub src_port: u16,
     pub dst_port: u16,
+    pub seq: u32,
+    pub ack: Option<u32>,
+    pub control: Control,
     pub payload: &'a [u8],
 }
 
@@ -372,13 +394,58 @@ impl<'a> Repr<'a> {
         //    return Err(Error::Checksum);
         // }
 
-        let src_port = packet.src_port();
-        let dst_port = packet.dst_port();
+        let control = if packet.flag_syn() {
+            Control::Syn
+        } else if packet.flag_fin() {
+            Control::Fin
+        } else if packet.flag_rst() {
+            Control::Rst
+        } else {
+            Control::None
+        };
+
+        let ack_num = if packet.flag_ack() {
+            Some(packet.ack_num())
+        } else {
+            None
+        };
 
         Ok(Repr {
-            src_port: src_port,
-            dst_port: dst_port,
+            src_port: packet.src_port(),
+            dst_port: packet.dst_port(),
+            seq: packet.seq_num(),
+            ack: ack_num,
+            control: control,
             payload: packet.payload(),
         })
+    }
+
+    pub fn header_len(&self) -> usize {
+        field::URGENT.end
+    }
+
+    pub fn emit<T: ?Sized>(&self,
+                           packet: &mut Packet<&mut T>,
+                           src_addr: &ipv4::Address,
+                           dst_addr: &ipv4::Address)
+        where T: AsRef<[u8]> + AsMut<[u8]>
+    {
+        packet.set_src_port(self.src_port);
+        packet.set_dst_port(self.dst_port);
+        packet.set_seq_num(self.seq);
+        packet.set_ack_num(self.ack.unwrap_or(0));
+        packet.set_data_offset(self.header_len() as u8);
+        packet.clear_flags();
+        match self.control {
+            Control::None => (),
+            Control::Syn => packet.set_flag_syn(true),
+            Control::Fin => packet.set_flag_fin(true),
+            Control::Rst => packet.set_flag_rst(true),
+        };
+        if self.ack.is_some() {
+            packet.set_flag_ack(true);
+        }
+        packet.payload().copy_from_slice(self.payload);
+        packet.fill_checksum(src_addr, dst_addr);
     }
 }
