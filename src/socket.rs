@@ -36,13 +36,15 @@ impl Socket {
         }
     }
 
-    fn send_syn_ack(&self, recv: &tcp::Packet<&[u8]>, src: tcp::Endpoint, dst: tcp::Endpoint) {
+    fn send_syn_ack(&self,
+                    recv: &tcp::Packet<&[u8]>,
+                    local: tcp::Endpoint,
+                    remote: tcp::Endpoint) {
         let mut buf = [0; 50];
-        let src_addr = src.addr;
         let len = {
             let iprepr = ipv4::Repr {
-                src_addr: src.addr,
-                dst_addr: dst.addr,
+                src_addr: local.addr,
+                dst_addr: remote.addr,
                 payload_len: 20,
             };
             let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
@@ -54,22 +56,22 @@ impl Socket {
                     .unwrap();
 
                 let tcprepr = tcp::Repr {
-                    src_port: src.port,
-                    dst_port: dst.port,
+                    src_port: local.port,
+                    dst_port: remote.port,
                     seq: 123123,
                     ack: Some(recv.seq_num() + 1),
                     control: tcp::Control::Syn,
                     payload: &[],
                 };
 
-                tcprepr.emit(&mut tcp, &src.addr, &dst.addr);
+                tcprepr.emit(&mut tcp, &local.addr, &remote.addr);
             }
 
             let total_len = ip.total_len() as usize;
             total_len
         };
 
-        self.raw.send(dst, &buf[..len]).unwrap();
+        self.raw.send(remote, &buf[..len]).unwrap();
     }
 
     pub fn recv(&self) -> io::Result<PacketBuffer> {
