@@ -6,7 +6,7 @@ use byteorder::{ByteOrder, NetworkEndian};
 
 const TCP_PROTOCOL: u8 = 6;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Address([u8; 4]);
 
 impl Address {

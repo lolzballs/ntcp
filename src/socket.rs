@@ -2,6 +2,7 @@ use super::ipv4;
 use super::tcp;
 use super::platform;
 
+use std::collections::{HashMap, VecDeque};
 use std::io;
 
 use error::Error;
@@ -23,16 +24,26 @@ impl PacketBuffer {
     }
 }
 
-pub struct Socket {
-    endpoint: tcp::Endpoint,
-    raw: platform::RawSocket,
+#[derive(Debug)]
+enum SocketState {
+    SynSent,
+    SynReceived,
+    Established,
+    Closed,
 }
 
-impl Socket {
+pub struct ServerSocket {
+    endpoint: tcp::Endpoint,
+    raw: platform::RawSocket,
+    sockets: HashMap<tcp::Endpoint, (SocketState, Socket)>,
+}
+
+impl ServerSocket {
     pub fn new(endpoint: tcp::Endpoint, raw: platform::RawSocket) -> Self {
-        Socket {
+        ServerSocket {
             endpoint: endpoint,
             raw: raw,
+            sockets: HashMap::new(),
         }
     }
 
@@ -74,10 +85,13 @@ impl Socket {
         self.raw.send(remote, &buf[..len]).unwrap();
     }
 
-    pub fn recv(&self) -> io::Result<PacketBuffer> {
+    pub fn recv(&mut self) {
         loop {
             let mut buf = [0; RECV_BUF_LEN];
-            let len = try!(self.raw.recv(&mut buf));
+            let len = self.raw.recv(&mut buf).unwrap_or(0);
+            if len == 0 {
+                continue;
+            }
             let ip = ipv4::Packet::new(&buf[..len]).unwrap();
             let iprepr = match ipv4::Repr::parse(&ip) {
                 Ok(repr) => repr,
@@ -109,10 +123,31 @@ impl Socket {
                                               tcp::Endpoint::new(iprepr.dst_addr,
                                                                  tcprepr.dst_port),
                                               endpoint);
+                            self.sockets
+                                .insert(endpoint,
+                                        (SocketState::SynReceived, Socket::new(endpoint)));
+                            println!("{:#?}", self.sockets);
                         }
                     }
                     tcp::Control::None => {
-                        return Ok(PacketBuffer::new(endpoint, tcp.payload()));
+                        let mut socket = self.sockets.get_mut(&endpoint).unwrap();
+                        match socket.0 {
+                            SocketState::SynSent => (),
+                            SocketState::SynReceived => {
+                                if tcprepr.ack.is_some() {
+                                    socket.0 = SocketState::Established;
+                                }
+                            }
+                            SocketState::Established => {
+                                socket.1
+                                    .rx_buffer
+                                    .push_back(PacketBuffer::new(endpoint, tcp.payload()));
+                            }
+                            SocketState::Closed => {
+                                // socket.close();
+                                // self.sockets.remove(&endpoint);
+                            }
+                        };
                     }
                     _ => println!("{:?}", tcp),
                 }
@@ -120,7 +155,35 @@ impl Socket {
         }
     }
 
-    pub fn send(&self, buf: PacketBuffer) {
+    pub fn send(&self, socket: &Socket, buf: PacketBuffer) {
         self.raw.send(buf.endpoint, &*buf.payload).unwrap();
+    }
+}
+
+#[derive(Debug)]
+pub struct Socket {
+    endpoint: tcp::Endpoint,
+    rx_buffer: VecDeque<PacketBuffer>,
+    tx_buffer: VecDeque<PacketBuffer>,
+}
+
+impl Socket {
+    pub fn new(endpoint: tcp::Endpoint) -> Self {
+        Socket {
+            endpoint: endpoint,
+            rx_buffer: VecDeque::new(),
+            tx_buffer: VecDeque::new(),
+        }
+    }
+    pub fn recv(&mut self) -> PacketBuffer {
+        loop {
+            if !self.rx_buffer.is_empty() {
+                return self.rx_buffer.pop_front().unwrap();
+            }
+        }
+    }
+
+    pub fn send(&mut self, buf: PacketBuffer) {
+        self.tx_buffer.push_back(buf);
     }
 }

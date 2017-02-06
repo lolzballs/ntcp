@@ -15,10 +15,7 @@ fn main() {
     };
 
     let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 6969);
-    let socket = socket::Socket::new(endpoint, raw);
-    loop {
-        let pkb = socket.recv().unwrap();
-        println!("{:?}", pkb);
-    }
+    let mut socket = socket::ServerSocket::new(endpoint, raw);
+    socket.recv();
     //    listen(recvfd);
 }

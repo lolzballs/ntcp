@@ -5,7 +5,7 @@ use std::fmt;
 
 use byteorder::{ByteOrder, NetworkEndian};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Endpoint {
     pub addr: ipv4::Address,
     pub port: u16,
