@@ -3,6 +3,7 @@ use super::tcp;
 use super::platform;
 
 use std::collections::{HashMap, VecDeque};
+use std::collections::hash_map::Entry;
 use std::io;
 
 use error::Error;
@@ -11,16 +12,12 @@ const RECV_BUF_LEN: usize = 2048;
 
 #[derive(Debug)]
 pub struct PacketBuffer {
-    endpoint: tcp::Endpoint,
     payload: Box<[u8]>,
 }
 
 impl PacketBuffer {
-    pub fn new(endpoint: tcp::Endpoint, payload: &[u8]) -> Self {
-        PacketBuffer {
-            endpoint: endpoint,
-            payload: payload.to_vec().into_boxed_slice(),
-        }
+    pub fn new(payload: &[u8]) -> Self {
+        PacketBuffer { payload: payload.to_vec().into_boxed_slice() }
     }
 }
 
@@ -116,8 +113,42 @@ impl ServerSocket {
             if tcprepr.dst_port == self.endpoint.port {
                 let endpoint = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
 
-                match tcprepr.control {
-                    tcp::Control::Syn => {
+                let known = {
+                    if let Entry::Occupied(mut socket_entry) = self.sockets.entry(endpoint) {
+                        match tcprepr.control {
+                            tcp::Control::Rst => {
+                                // TODO: Close the socket (notify)
+                                socket_entry.remove_entry();
+                                println!("Connection reset with: {:?}", endpoint);
+                            }
+                            tcp::Control::None => {
+                                let mut socket = socket_entry.get_mut();
+                                match socket.0 {
+                                    SocketState::SynSent => (),
+                                    SocketState::SynReceived => {
+                                        if tcprepr.ack.is_some() {
+                                            socket.0 = SocketState::Established;
+                                            println!("Connection established with: {:?}", endpoint);
+                                        }
+                                    }
+                                    SocketState::Established => {
+                                        socket.1
+                                            .rx_buffer
+                                            .push_back(PacketBuffer::new(tcp.payload()));
+                                        println!("{:?}", socket.1);
+                                    }
+                                    SocketState::Closed => (),
+                                };
+                            }
+                            _ => println!("{:?}", tcprepr),
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if !known {
+                    if tcprepr.control == tcp::Control::Syn {
                         if tcprepr.ack.is_none() {
                             self.send_syn_ack(&tcp,
                                               tcp::Endpoint::new(iprepr.dst_addr,
@@ -129,34 +160,13 @@ impl ServerSocket {
                             println!("{:#?}", self.sockets);
                         }
                     }
-                    tcp::Control::None => {
-                        let mut socket = self.sockets.get_mut(&endpoint).unwrap();
-                        match socket.0 {
-                            SocketState::SynSent => (),
-                            SocketState::SynReceived => {
-                                if tcprepr.ack.is_some() {
-                                    socket.0 = SocketState::Established;
-                                }
-                            }
-                            SocketState::Established => {
-                                socket.1
-                                    .rx_buffer
-                                    .push_back(PacketBuffer::new(endpoint, tcp.payload()));
-                            }
-                            SocketState::Closed => {
-                                // socket.close();
-                                // self.sockets.remove(&endpoint);
-                            }
-                        };
-                    }
-                    _ => println!("{:?}", tcp),
                 }
             }
         }
     }
 
     pub fn send(&self, socket: &Socket, buf: PacketBuffer) {
-        self.raw.send(buf.endpoint, &*buf.payload).unwrap();
+        self.raw.send(socket.endpoint, &*buf.payload).unwrap();
     }
 }
 
