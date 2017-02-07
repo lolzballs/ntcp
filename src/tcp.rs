@@ -421,7 +421,7 @@ impl<'a> Repr<'a> {
     }
 
     pub fn header_len(&self) -> usize {
-        field::URGENT.end
+        field::URGENT.end + 4
     }
 
     pub fn emit<T: ?Sized>(&self,
@@ -434,6 +434,7 @@ impl<'a> Repr<'a> {
         packet.set_dst_port(self.dst_port);
         packet.set_seq_num(self.seq);
         packet.set_ack_num(self.ack.unwrap_or(0));
+        packet.set_window_size(0x123);
         packet.set_data_offset(self.header_len() as u8);
         packet.clear_flags();
         match self.control {
