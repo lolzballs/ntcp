@@ -25,11 +25,11 @@ fn main() {
     loop {
         let mut socket = rx.recv().unwrap();
         thread::spawn(move || {
-            socket.send(socket::PacketBuffer::new(&[97, 98]));
+            socket.send(socket::PacketBuffer::new(&[97, 98])).unwrap();
             loop {
                 let packet = match socket.recv() {
                     Ok(p) => p,
-                    Err(e) => break,
+                    Err(_) => break,
                 };
                 println!("{:?}", packet);
             }

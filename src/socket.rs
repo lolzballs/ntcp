@@ -212,10 +212,10 @@ impl Socket {
     }
 
     pub fn recv(&mut self) -> Result<PacketBuffer, SocketError> {
-        self.rx.recv().map_err(|_: mpsc::RecvError| SocketError::Closed)
+        self.rx.recv().map_err(|_| SocketError::Closed)
     }
 
-    pub fn send(&mut self, buf: PacketBuffer) -> Result<PacketBuffer, SocketError> {
-        self.rx.recv().map_err(|_: mpsc::RecvError| SocketError::Closed)
+    pub fn send(&mut self, buf: PacketBuffer) -> Result<(), SocketError> {
+        self.tx.send((self.endpoint, buf)).map_err(|_| SocketError::Closed)
     }
 }
