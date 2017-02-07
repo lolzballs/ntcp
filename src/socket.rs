@@ -2,9 +2,8 @@ use super::ipv4;
 use super::tcp;
 use super::platform;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::io;
 use std::thread;
 use std::sync::mpsc;
 
@@ -141,7 +140,10 @@ impl ServerSocket {
                                         }
                                     }
                                     SocketState::Established => {
-                                        (socket.1).0.send(PacketBuffer::new(tcp.payload()));
+                                        (socket.1)
+                                            .0
+                                            .send(PacketBuffer::new(tcp.payload()))
+                                            .unwrap();
                                     }
                                     SocketState::Closed => (),
                                 };
@@ -167,7 +169,7 @@ impl ServerSocket {
                             let (rx_tx, rx_rx) = mpsc::channel();
                             let (tx_tx, tx_rx) = mpsc::channel();
 
-                            socket_send.send(Socket::new(endpoint, rx_rx, tx_tx));
+                            socket_send.send(Socket::new(endpoint, rx_rx, tx_tx)).unwrap();
                             self.sockets
                                 .insert(endpoint, (SocketState::SynReceived, (rx_tx, tx_rx)));
                         }

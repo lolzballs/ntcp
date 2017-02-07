@@ -3,6 +3,7 @@ extern crate core;
 extern crate libc;
 
 use std::sync::mpsc;
+use std::thread;
 
 mod error;
 mod ipv4;
@@ -23,6 +24,10 @@ fn main() {
 
     loop {
         let mut socket = rx.recv().unwrap();
-        println!("{:?}", socket.recv());
+        thread::spawn(move || {
+            loop {
+                println!("{:?}", socket.recv());
+            }
+        });
     }
 }
