@@ -5,6 +5,8 @@ use super::platform;
 use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::Entry;
 use std::io;
+use std::thread;
+use std::sync::mpsc;
 
 use error::Error;
 
@@ -32,7 +34,8 @@ enum SocketState {
 pub struct ServerSocket {
     endpoint: tcp::Endpoint,
     raw: platform::RawSocket,
-    sockets: HashMap<tcp::Endpoint, (SocketState, Socket)>,
+    sockets: HashMap<tcp::Endpoint,
+                     (SocketState, (mpsc::Sender<PacketBuffer>, mpsc::Receiver<PacketBuffer>))>,
 }
 
 impl ServerSocket {
@@ -42,6 +45,12 @@ impl ServerSocket {
             raw: raw,
             sockets: HashMap::new(),
         }
+    }
+
+    pub fn listen(mut self, tx: mpsc::Sender<Socket>) {
+        thread::spawn(move || {
+            self.recv(tx);
+        });
     }
 
     fn send_syn_ack(&self,
@@ -82,7 +91,7 @@ impl ServerSocket {
         self.raw.send(remote, &buf[..len]).unwrap();
     }
 
-    pub fn recv(&mut self) {
+    fn recv(&mut self, socket_send: mpsc::Sender<Socket>) {
         loop {
             let mut buf = [0; RECV_BUF_LEN];
             let len = self.raw.recv(&mut buf).unwrap_or(0);
@@ -132,15 +141,15 @@ impl ServerSocket {
                                         }
                                     }
                                     SocketState::Established => {
-                                        socket.1
-                                            .rx_buffer
-                                            .push_back(PacketBuffer::new(tcp.payload()));
-                                        println!("{:?}", socket.1);
+                                        (socket.1).0.send(PacketBuffer::new(tcp.payload()));
                                     }
                                     SocketState::Closed => (),
                                 };
                             }
-                            _ => println!("{:?}", tcprepr),
+                            _ => {
+                                println!("WARNING: Control flag not implemented: {:?}",
+                                         tcprepr.control)
+                            }
                         }
                         true
                     } else {
@@ -154,10 +163,13 @@ impl ServerSocket {
                                               tcp::Endpoint::new(iprepr.dst_addr,
                                                                  tcprepr.dst_port),
                                               endpoint);
+                            // Channel for sending
+                            let (rx_tx, rx_rx) = mpsc::channel();
+                            let (tx_tx, tx_rx) = mpsc::channel();
+
+                            socket_send.send(Socket::new(endpoint, rx_rx, tx_tx));
                             self.sockets
-                                .insert(endpoint,
-                                        (SocketState::SynReceived, Socket::new(endpoint)));
-                            println!("{:#?}", self.sockets);
+                                .insert(endpoint, (SocketState::SynReceived, (rx_tx, tx_rx)));
                         }
                     }
                 }
@@ -172,28 +184,27 @@ impl ServerSocket {
 
 #[derive(Debug)]
 pub struct Socket {
-    endpoint: tcp::Endpoint,
-    rx_buffer: VecDeque<PacketBuffer>,
-    tx_buffer: VecDeque<PacketBuffer>,
+    pub endpoint: tcp::Endpoint,
+    rx: mpsc::Receiver<PacketBuffer>,
+    tx: mpsc::Sender<PacketBuffer>,
 }
 
 impl Socket {
-    pub fn new(endpoint: tcp::Endpoint) -> Self {
+    pub fn new(endpoint: tcp::Endpoint,
+               rx: mpsc::Receiver<PacketBuffer>,
+               tx: mpsc::Sender<PacketBuffer>)
+               -> Self {
         Socket {
             endpoint: endpoint,
-            rx_buffer: VecDeque::new(),
-            tx_buffer: VecDeque::new(),
+            rx: rx,
+            tx: tx,
         }
     }
     pub fn recv(&mut self) -> PacketBuffer {
-        loop {
-            if !self.rx_buffer.is_empty() {
-                return self.rx_buffer.pop_front().unwrap();
-            }
-        }
+        self.rx.recv().unwrap()
     }
 
     pub fn send(&mut self, buf: PacketBuffer) {
-        self.tx_buffer.push_back(buf);
+        self.tx.send(buf).unwrap();
     }
 }

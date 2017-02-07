@@ -2,6 +2,8 @@ extern crate byteorder;
 extern crate core;
 extern crate libc;
 
+use std::sync::mpsc;
+
 mod error;
 mod ipv4;
 mod tcp;
@@ -14,8 +16,13 @@ fn main() {
         Err(error) => panic!("Error creating RawSocket: {}", error),
     };
 
+    let (tx, rx) = mpsc::channel();
     let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 6969);
-    let mut socket = socket::ServerSocket::new(endpoint, raw);
-    socket.recv();
-    //    listen(recvfd);
+    let server = socket::ServerSocket::new(endpoint, raw);
+    server.listen(tx);
+
+    loop {
+        let mut socket = rx.recv().unwrap();
+        println!("{:?}", socket.recv());
+    }
 }
