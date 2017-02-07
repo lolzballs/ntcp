@@ -25,8 +25,13 @@ fn main() {
     loop {
         let mut socket = rx.recv().unwrap();
         thread::spawn(move || {
+            socket.send(socket::PacketBuffer::new(&[97, 98]));
             loop {
-                println!("{:?}", socket.recv());
+                let packet = match socket.recv() {
+                    Ok(p) => p,
+                    Err(e) => break,
+                };
+                println!("{:?}", packet);
             }
         });
     }

@@ -7,3 +7,8 @@ pub enum Error {
     UnknownProtocol,
     Checksum,
 }
+
+#[derive(Debug)]
+pub enum SocketError {
+    Closed,
+}

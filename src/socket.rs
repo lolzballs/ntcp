@@ -4,10 +4,10 @@ use super::platform;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::sync::{Arc, mpsc};
 use std::thread;
-use std::sync::mpsc;
 
-use error::Error;
+use error::{Error, SocketError};
 
 const RECV_BUF_LEN: usize = 2048;
 
@@ -22,7 +22,7 @@ impl PacketBuffer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum SocketState {
     SynSent,
     SynReceived,
@@ -32,24 +32,35 @@ enum SocketState {
 
 pub struct ServerSocket {
     endpoint: tcp::Endpoint,
-    raw: platform::RawSocket,
-    sockets: HashMap<tcp::Endpoint,
-                     (SocketState, (mpsc::Sender<PacketBuffer>, mpsc::Receiver<PacketBuffer>))>,
+    raw: Arc<platform::RawSocket>,
+    sockets: HashMap<tcp::Endpoint, (SocketState, mpsc::Sender<PacketBuffer>)>,
 }
 
 impl ServerSocket {
     pub fn new(endpoint: tcp::Endpoint, raw: platform::RawSocket) -> Self {
         ServerSocket {
             endpoint: endpoint,
-            raw: raw,
+            raw: Arc::new(raw),
             sockets: HashMap::new(),
         }
     }
 
     pub fn listen(mut self, tx: mpsc::Sender<Socket>) {
-        thread::spawn(move || {
-            self.recv(tx);
-        });
+        let (tx_send, tx_recv) = mpsc::channel();
+        {
+            let raw = self.raw.clone();
+            thread::spawn(move || {
+                loop {
+                    let buf = tx_recv.recv().unwrap();
+                    println!("TODO: send {:?}", buf);
+                }
+            });
+        }
+        {
+            thread::spawn(move || {
+                self.recv(tx, tx_send);
+            });
+        }
     }
 
     fn send_syn_ack(&self,
@@ -90,7 +101,9 @@ impl ServerSocket {
         self.raw.send(remote, &buf[..len]).unwrap();
     }
 
-    fn recv(&mut self, socket_send: mpsc::Sender<Socket>) {
+    fn recv(&mut self,
+            socket_send: mpsc::Sender<Socket>,
+            tx_send: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
         loop {
             let mut buf = [0; RECV_BUF_LEN];
             let len = self.raw.recv(&mut buf).unwrap_or(0);
@@ -141,7 +154,6 @@ impl ServerSocket {
                                     }
                                     SocketState::Established => {
                                         (socket.1)
-                                            .0
                                             .send(PacketBuffer::new(tcp.payload()))
                                             .unwrap();
                                     }
@@ -165,22 +177,18 @@ impl ServerSocket {
                                               tcp::Endpoint::new(iprepr.dst_addr,
                                                                  tcprepr.dst_port),
                                               endpoint);
-                            // Channel for sending
+                            // Channel for sending packets
                             let (rx_tx, rx_rx) = mpsc::channel();
-                            let (tx_tx, tx_rx) = mpsc::channel();
 
-                            socket_send.send(Socket::new(endpoint, rx_rx, tx_tx)).unwrap();
+                            socket_send.send(Socket::new(endpoint, rx_rx, tx_send.clone()))
+                                .unwrap();
                             self.sockets
-                                .insert(endpoint, (SocketState::SynReceived, (rx_tx, tx_rx)));
+                                .insert(endpoint, (SocketState::SynReceived, rx_tx));
                         }
                     }
                 }
             }
         }
-    }
-
-    pub fn send(&self, socket: &Socket, buf: PacketBuffer) {
-        self.raw.send(socket.endpoint, &*buf.payload).unwrap();
     }
 }
 
@@ -188,13 +196,13 @@ impl ServerSocket {
 pub struct Socket {
     pub endpoint: tcp::Endpoint,
     rx: mpsc::Receiver<PacketBuffer>,
-    tx: mpsc::Sender<PacketBuffer>,
+    tx: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>,
 }
 
 impl Socket {
     pub fn new(endpoint: tcp::Endpoint,
                rx: mpsc::Receiver<PacketBuffer>,
-               tx: mpsc::Sender<PacketBuffer>)
+               tx: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>)
                -> Self {
         Socket {
             endpoint: endpoint,
@@ -202,11 +210,12 @@ impl Socket {
             tx: tx,
         }
     }
-    pub fn recv(&mut self) -> PacketBuffer {
-        self.rx.recv().unwrap()
+
+    pub fn recv(&mut self) -> Result<PacketBuffer, SocketError> {
+        self.rx.recv().map_err(|_: mpsc::RecvError| SocketError::Closed)
     }
 
-    pub fn send(&mut self, buf: PacketBuffer) {
-        self.tx.send(buf).unwrap();
+    pub fn send(&mut self, buf: PacketBuffer) -> Result<PacketBuffer, SocketError> {
+        self.rx.recv().map_err(|_: mpsc::RecvError| SocketError::Closed)
     }
 }
