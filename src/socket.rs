@@ -46,13 +46,14 @@ impl ServerSocket {
     }
 
     pub fn listen(mut self, tx: mpsc::Sender<Socket>) {
-        let (tx_send, tx_recv) = mpsc::channel();
+        let (tx_send, tx_recv) = mpsc::channel::<(tcp::Endpoint, PacketBuffer)>();
         {
             let raw = self.raw.clone();
             thread::spawn(move || {
                 loop {
                     let buf = tx_recv.recv().unwrap();
                     println!("TODO: send {:?}", buf);
+                    raw.send(buf.0, &*buf.1.payload).unwrap();
                 }
             });
         }
@@ -140,7 +141,6 @@ impl ServerSocket {
                             tcp::Control::Rst => {
                                 // TODO: Close the socket (notify)
                                 socket_entry.remove_entry();
-                                println!("Connection reset with: {:?}", endpoint);
                             }
                             tcp::Control::None => {
                                 let mut socket = socket_entry.get_mut();
@@ -149,7 +149,6 @@ impl ServerSocket {
                                     SocketState::SynReceived => {
                                         if tcprepr.ack.is_some() {
                                             socket.0 = SocketState::Established;
-                                            println!("Connection established with: {:?}", endpoint);
                                         }
                                     }
                                     SocketState::Established => {

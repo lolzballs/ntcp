@@ -24,8 +24,9 @@ fn main() {
 
     loop {
         let mut socket = rx.recv().unwrap();
+        println!("Connection established with: {:?}", socket.endpoint);
         thread::spawn(move || {
-            socket.send(socket::PacketBuffer::new(&[97, 98])).unwrap();
+            // socket.send(socket::PacketBuffer::new(&[97, 98])).unwrap();
             loop {
                 let packet = match socket.recv() {
                     Ok(p) => p,
@@ -33,6 +34,7 @@ fn main() {
                 };
                 println!("{:?}", packet);
             }
+            println!("Connection closed with: {:?}", socket.endpoint);
         });
     }
 }
