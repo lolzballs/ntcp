@@ -134,14 +134,10 @@ impl ServerSocket {
             };
             if tcprepr.dst_port == self.endpoint.port {
                 let endpoint = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
-
                 let known = {
                     if let Entry::Occupied(mut socket_entry) = self.sockets.entry(endpoint) {
                         match tcprepr.control {
-                            tcp::Control::Rst => {
-                                // TODO: Close the socket (notify)
-                                socket_entry.remove_entry();
-                            }
+                            tcp::Control::Rst => socket_entry.remove_entry(),
                             tcp::Control::None => {
                                 let mut socket = socket_entry.get_mut();
                                 match socket.0 {
@@ -160,7 +156,7 @@ impl ServerSocket {
                                 };
                             }
                             _ => {
-                                println!("WARNING: Control flag not implemented: {:?}",
+                                println!("WARNING: Control flag not implemented({:?})",
                                          tcprepr.control)
                             }
                         }
@@ -172,12 +168,14 @@ impl ServerSocket {
                 if !known {
                     if tcprepr.control == tcp::Control::Syn {
                         if tcprepr.ack.is_none() {
+
                             self.send_syn_ack(&tcp,
                                               tcp::Endpoint::new(iprepr.dst_addr,
                                                                  tcprepr.dst_port),
                                               endpoint);
                             // Channel for sending packets
                             let (rx_tx, rx_rx) = mpsc::channel();
+
 
                             socket_send.send(Socket::new(endpoint, rx_rx, tx_send.clone()))
                                 .unwrap();
