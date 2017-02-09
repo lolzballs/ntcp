@@ -137,7 +137,9 @@ impl ServerSocket {
                 let known = {
                     if let Entry::Occupied(mut socket_entry) = self.sockets.entry(endpoint) {
                         match tcprepr.control {
-                            tcp::Control::Rst => socket_entry.remove_entry(),
+                            tcp::Control::Rst => {
+                                socket_entry.remove_entry();
+                            }
                             tcp::Control::None => {
                                 let mut socket = socket_entry.get_mut();
                                 match socket.0 {
