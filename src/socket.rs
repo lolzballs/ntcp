@@ -30,22 +30,22 @@ enum SocketState {
     Closed,
 }
 
-pub struct ServerSocket {
+pub struct SocketInterface {
     endpoint: tcp::Endpoint,
     raw: Arc<platform::RawSocket>,
     sockets: HashMap<tcp::Endpoint, (SocketState, mpsc::Sender<PacketBuffer>)>,
 }
 
-impl ServerSocket {
-    pub fn new(endpoint: tcp::Endpoint, raw: platform::RawSocket) -> Self {
-        ServerSocket {
+impl SocketInterface {
+    pub fn new(endpoint: tcp::Endpoint, raw: Arc<platform::RawSocket>) -> Self {
+        SocketInterface {
             endpoint: endpoint,
-            raw: Arc::new(raw),
+            raw: raw,
             sockets: HashMap::new(),
         }
     }
 
-    pub fn listen(mut self, tx: mpsc::Sender<Socket>) {
+    pub fn start(mut self, tx: mpsc::Sender<Socket>) {
         let (tx_send, tx_recv) = mpsc::channel::<(tcp::Endpoint, PacketBuffer)>();
         {
             let raw = self.raw.clone();
@@ -102,7 +102,7 @@ impl ServerSocket {
         self.raw.send(remote, &buf[..len]).unwrap();
     }
 
-    fn recv(&mut self,
+    fn recv(mut self,
             socket_send: mpsc::Sender<Socket>,
             tx_send: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
         loop {
@@ -191,7 +191,20 @@ impl ServerSocket {
     }
 }
 
-#[derive(Debug)]
+pub struct ServerSocket {
+    interface: SocketInterface,
+}
+
+impl ServerSocket {
+    pub fn new(interface: SocketInterface) -> Self {
+        ServerSocket { interface: interface }
+    }
+
+    pub fn listen(mut self, tx: mpsc::Sender<Socket>) {
+        self.interface.start(tx);
+    }
+}
+
 pub struct Socket {
     pub endpoint: tcp::Endpoint,
     rx: mpsc::Receiver<PacketBuffer>,

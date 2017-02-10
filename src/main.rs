@@ -2,6 +2,7 @@ extern crate byteorder;
 extern crate core;
 extern crate libc;
 
+use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
 
@@ -13,13 +14,14 @@ mod socket;
 
 fn main() {
     let raw = match platform::RawSocket::new() {
-        Ok(socket) => socket,
+        Ok(socket) => Arc::new(socket),
         Err(error) => panic!("Error creating RawSocket: {}", error),
     };
 
     let (tx, rx) = mpsc::channel();
     let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 6969);
-    let server = socket::ServerSocket::new(endpoint, raw);
+    let interface = socket::SocketInterface::new(endpoint, raw);
+    let server = socket::ServerSocket::new(interface);
     server.listen(tx);
 
     loop {
