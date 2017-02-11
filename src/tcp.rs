@@ -421,7 +421,7 @@ impl<'a> Repr<'a> {
     }
 
     pub fn header_len(&self) -> usize {
-        field::URGENT.end + 4
+        field::URGENT.end
     }
 
     pub fn emit<T: ?Sized>(&self,

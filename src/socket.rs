@@ -85,12 +85,12 @@ impl SocketInterface {
     }
 
     fn send_syn(raw: Arc<platform::RawSocket>, local: tcp::Endpoint, remote: tcp::Endpoint) {
-        let mut buf = [0; 44];
+        let mut buf = [0; 40];
         let len = {
             let iprepr = ipv4::Repr {
                 src_addr: local.addr,
                 dst_addr: remote.addr,
-                payload_len: 24,
+                payload_len: 20,
             };
             let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
             {
@@ -123,12 +123,12 @@ impl SocketInterface {
                     recv: &tcp::Packet<&[u8]>,
                     local: tcp::Endpoint,
                     remote: tcp::Endpoint) {
-        let mut buf = [0; 44];
+        let mut buf = [0; 40];
         let len = {
             let iprepr = ipv4::Repr {
                 src_addr: local.addr,
                 dst_addr: remote.addr,
-                payload_len: 24,
+                payload_len: 20,
             };
             let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
             {
