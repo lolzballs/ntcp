@@ -21,8 +21,8 @@ fn main() {
     let (tx, rx) = mpsc::channel();
     let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 6969);
     let interface = socket::SocketInterface::new(endpoint, raw);
-    let server = socket::ServerSocket::new(interface);
-    server.listen(tx);
+    let server = socket::ServerSocket::new(interface, tx);
+    server.listen();
 
     loop {
         let mut socket = rx.recv().unwrap();

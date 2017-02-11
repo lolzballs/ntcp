@@ -4,8 +4,9 @@ use super::platform;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+use std::time::Duration;
 
 use error::{Error, SocketError};
 
@@ -31,21 +32,37 @@ enum SocketState {
 }
 
 pub struct SocketInterface {
+    listening: bool,
     endpoint: tcp::Endpoint,
     raw: Arc<platform::RawSocket>,
-    sockets: HashMap<tcp::Endpoint, (SocketState, mpsc::Sender<PacketBuffer>)>,
+    sockets: Arc<Mutex<HashMap<tcp::Endpoint, (SocketState, mpsc::Sender<PacketBuffer>)>>>,
 }
 
 impl SocketInterface {
     pub fn new(endpoint: tcp::Endpoint, raw: Arc<platform::RawSocket>) -> Self {
         SocketInterface {
+            listening: false,
             endpoint: endpoint,
             raw: raw,
-            sockets: HashMap::new(),
+            sockets: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn start(mut self, tx: mpsc::Sender<Socket>) {
+    pub fn create(&mut self, remote: tcp::Endpoint) -> Result<Socket, SocketError> {
+        let (tx, rx) = mpsc::channel::<Socket>();
+        if !self.listening {
+            self.start(tx);
+        }
+        Self::send_syn(self.raw.clone(), self.endpoint, remote);
+        rx.recv_timeout(Duration::from_secs(2)).map_err(|_| SocketError::Timeout)
+    }
+
+    pub fn listen(&mut self, tx: mpsc::Sender<Socket>) {
+        self.start(tx);
+    }
+
+    pub fn start(&mut self, tx: mpsc::Sender<Socket>) {
+        self.listening = true;
         let (tx_send, tx_recv) = mpsc::channel::<(tcp::Endpoint, PacketBuffer)>();
         {
             let raw = self.raw.clone();
@@ -58,13 +75,51 @@ impl SocketInterface {
             });
         }
         {
+            let endpoint = self.endpoint;
+            let raw = self.raw.clone();
+            let sockets = self.sockets.clone();
             thread::spawn(move || {
-                self.recv(tx, tx_send);
+                Self::recv(endpoint, raw, sockets, tx, tx_send);
             });
         }
     }
 
-    fn send_syn_ack(&self,
+    fn send_syn(raw: Arc<platform::RawSocket>, local: tcp::Endpoint, remote: tcp::Endpoint) {
+        let mut buf = [0; 40];
+        let len = {
+            let iprepr = ipv4::Repr {
+                src_addr: local.addr,
+                dst_addr: remote.addr,
+                payload_len: 20,
+            };
+            let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
+            {
+                iprepr.send(&mut ip);
+            }
+            {
+                let mut tcp = tcp::Packet::new(&mut ip.payload_mut()[..iprepr.payload_len])
+                    .unwrap();
+
+                let tcprepr = tcp::Repr {
+                    src_port: local.port,
+                    dst_port: remote.port,
+                    seq: 123123,
+                    ack: None,
+                    control: tcp::Control::Syn,
+                    payload: &[],
+                };
+
+                tcprepr.emit(&mut tcp, &local.addr, &remote.addr);
+            }
+
+            let total_len = ip.total_len() as usize;
+            total_len
+        };
+
+        raw.send(remote, &buf[..len]).unwrap();
+    }
+
+    fn send_syn_ack(raw: Arc<platform::RawSocket>,
                     recv: &tcp::Packet<&[u8]>,
                     local: tcp::Endpoint,
                     remote: tcp::Endpoint) {
@@ -99,15 +154,18 @@ impl SocketInterface {
             total_len
         };
 
-        self.raw.send(remote, &buf[..len]).unwrap();
+        raw.send(remote, &buf[..len]).unwrap();
     }
 
-    fn recv(mut self,
+    fn recv(local: tcp::Endpoint,
+            raw: Arc<platform::RawSocket>,
+            sockets: Arc<Mutex<HashMap<tcp::Endpoint,
+                                       (SocketState, mpsc::Sender<PacketBuffer>)>>>,
             socket_send: mpsc::Sender<Socket>,
             tx_send: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
         loop {
             let mut buf = [0; RECV_BUF_LEN];
-            let len = self.raw.recv(&mut buf).unwrap_or(0);
+            let len = raw.recv(&mut buf).unwrap_or(0);
             if len == 0 {
                 continue;
             }
@@ -116,7 +174,7 @@ impl SocketInterface {
                 Ok(repr) => repr,
                 Err(Error::UnknownProtocol) => continue,
                 Err(Error::Truncated) => {
-                    println!("WARN: IPv4 packet exceeded MTU");
+                    // println!("WARN: IPv4 packet exceeded MTU");
                     continue;
                 }
                 Err(error) => {
@@ -132,10 +190,11 @@ impl SocketInterface {
                     continue;
                 }
             };
-            if tcprepr.dst_port == self.endpoint.port {
+            if tcprepr.dst_port == local.port {
                 let endpoint = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
+                let mut sockets = sockets.lock().unwrap();
                 let known = {
-                    if let Entry::Occupied(mut socket_entry) = self.sockets.entry(endpoint) {
+                    if let Entry::Occupied(mut socket_entry) = sockets.entry(endpoint) {
                         match tcprepr.control {
                             tcp::Control::Rst => {
                                 socket_entry.remove_entry();
@@ -171,18 +230,18 @@ impl SocketInterface {
                     if tcprepr.control == tcp::Control::Syn {
                         if tcprepr.ack.is_none() {
 
-                            self.send_syn_ack(&tcp,
-                                              tcp::Endpoint::new(iprepr.dst_addr,
-                                                                 tcprepr.dst_port),
-                                              endpoint);
+                            Self::send_syn_ack(raw.clone(),
+                                               &tcp,
+                                               tcp::Endpoint::new(iprepr.dst_addr,
+                                                                  tcprepr.dst_port),
+                                               endpoint);
                             // Channel for sending packets
                             let (rx_tx, rx_rx) = mpsc::channel();
 
 
                             socket_send.send(Socket::new(endpoint, rx_rx, tx_send.clone()))
                                 .unwrap();
-                            self.sockets
-                                .insert(endpoint, (SocketState::SynReceived, rx_tx));
+                            sockets.insert(endpoint, (SocketState::SynReceived, rx_tx));
                         }
                     }
                 }
@@ -193,15 +252,19 @@ impl SocketInterface {
 
 pub struct ServerSocket {
     interface: SocketInterface,
+    tx_socket: mpsc::Sender<Socket>,
 }
 
 impl ServerSocket {
-    pub fn new(interface: SocketInterface) -> Self {
-        ServerSocket { interface: interface }
+    pub fn new(interface: SocketInterface, tx_socket: mpsc::Sender<Socket>) -> Self {
+        ServerSocket {
+            interface: interface,
+            tx_socket: tx_socket,
+        }
     }
 
-    pub fn listen(mut self, tx: mpsc::Sender<Socket>) {
-        self.interface.start(tx);
+    pub fn listen(mut self) {
+        self.interface.listen(self.tx_socket);
     }
 }
 
