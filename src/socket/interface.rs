@@ -16,7 +16,7 @@ pub struct Interface {
     listening: bool,
     endpoint: tcp::Endpoint,
     raw: Arc<platform::RawSocket>,
-    sockets: Arc<Mutex<HashMap<tcp::Endpoint, (SocketState, mpsc::Sender<PacketBuffer>)>>>,
+    sockets: Arc<Mutex<HashMap<tcp::Endpoint, (SocketState, Option<mpsc::Sender<PacketBuffer>>)>>>,
 }
 
 impl Interface {
@@ -29,12 +29,16 @@ impl Interface {
         }
     }
 
-    pub fn create(&mut self, remote: tcp::Endpoint) -> Result<Socket, SocketError> {
+    pub fn connect(&mut self, remote: tcp::Endpoint) -> Result<Socket, SocketError> {
         let (tx, rx) = mpsc::channel::<Socket>();
         if !self.listening {
             self.start(tx);
         }
-        Self::send_syn(self.raw.clone(), self.endpoint, remote);
+        {
+            let mut sockets = self.sockets.lock().unwrap();
+            sockets.insert(remote, (SocketState::SynSent, None));
+            Self::send_syn(self.raw.clone(), self.endpoint, remote);
+        }
         rx.recv_timeout(Duration::from_secs(2)).map_err(|_| SocketError::Timeout)
     }
 
@@ -100,6 +104,44 @@ impl Interface {
         raw.send(remote, &buf[..len]).unwrap();
     }
 
+    fn send_ack(raw: Arc<platform::RawSocket>,
+                recv: &tcp::Packet<&[u8]>,
+                local: tcp::Endpoint,
+                remote: tcp::Endpoint) {
+        let mut buf = [0; 40];
+        let len = {
+            let iprepr = ipv4::Repr {
+                src_addr: local.addr,
+                dst_addr: remote.addr,
+                payload_len: 20,
+            };
+            let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
+            {
+                iprepr.send(&mut ip);
+            }
+            {
+                let mut tcp = tcp::Packet::new(&mut ip.payload_mut()[..iprepr.payload_len])
+                    .unwrap();
+
+                let tcprepr = tcp::Repr {
+                    src_port: local.port,
+                    dst_port: remote.port,
+                    seq: recv.ack_num() + 1,
+                    ack: Some(recv.seq_num() + 1),
+                    control: tcp::Control::None,
+                    payload: &[],
+                };
+
+                tcprepr.emit(&mut tcp, &local.addr, &remote.addr);
+            }
+
+            let total_len = ip.total_len() as usize;
+            total_len
+        };
+
+        raw.send(remote, &buf[..len]).unwrap();
+    }
+
     fn send_syn_ack(raw: Arc<platform::RawSocket>,
                     recv: &tcp::Packet<&[u8]>,
                     local: tcp::Endpoint,
@@ -141,7 +183,7 @@ impl Interface {
     fn recv(local: tcp::Endpoint,
             raw: Arc<platform::RawSocket>,
             sockets: Arc<Mutex<HashMap<tcp::Endpoint,
-                                       (SocketState, mpsc::Sender<PacketBuffer>)>>>,
+                                       (SocketState, Option<mpsc::Sender<PacketBuffer>>)>>>,
             socket_send: mpsc::Sender<Socket>,
             tx_send: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
         loop {
@@ -180,6 +222,26 @@ impl Interface {
                             tcp::Control::Rst => {
                                 socket_entry.remove_entry();
                             }
+                            tcp::Control::Syn => {
+                                let mut socket = socket_entry.get_mut();
+                                match socket.0 {
+                                    SocketState::SynSent => {
+                                        if tcprepr.ack.is_some() {
+                                            Self::send_ack(raw.clone(), &tcp, local, endpoint);
+                                            let (rx_tx, rx_rx) = mpsc::channel();
+
+
+                                            socket_send.send(Socket::new(endpoint,
+                                                                  rx_rx,
+                                                                  tx_send.clone()))
+                                                .unwrap();
+                                            socket.0 = SocketState::Established;
+                                            socket.1 = Some(rx_tx);
+                                        }
+                                    }
+                                    _ => (),
+                                }
+                            }
                             tcp::Control::None => {
                                 let mut socket = socket_entry.get_mut();
                                 match socket.0 {
@@ -190,8 +252,11 @@ impl Interface {
                                         }
                                     }
                                     SocketState::Established => {
-                                        (socket.1)
-                                            .send(PacketBuffer::new(tcp.payload()))
+                                        let socket = match socket.1 {
+                                            Some(ref socket) => socket,
+                                            None => continue,
+                                        };
+                                        socket.send(PacketBuffer::new(tcp.payload()))
                                             .unwrap();
                                     }
                                     SocketState::Closed => (),
@@ -222,7 +287,7 @@ impl Interface {
 
                             socket_send.send(Socket::new(endpoint, rx_rx, tx_send.clone()))
                                 .unwrap();
-                            sockets.insert(endpoint, (SocketState::SynReceived, rx_tx));
+                            sockets.insert(endpoint, (SocketState::SynReceived, Some(rx_tx)));
                         }
                     }
                 }

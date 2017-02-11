@@ -50,6 +50,7 @@ impl ServerSocket {
     }
 }
 
+#[derive(Debug)]
 pub struct Socket {
     pub endpoint: tcp::Endpoint,
     rx: mpsc::Receiver<PacketBuffer>,
