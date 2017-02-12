@@ -84,15 +84,13 @@ impl Interface {
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
 
-        let handle = match mem::replace(&mut self.send_thread, None) {
-            Some(handle) => handle.join(),
-            None => return,
-        };
+        if let Some(handle) = mem::replace(&mut self.send_thread, None) {
+            handle.join().unwrap();
+        }
 
-        let handle = match mem::replace(&mut self.recv_thread, None) {
-            Some(handle) => handle.join(),
-            None => return,
-        };
+        if let Some(handle) = mem::replace(&mut self.recv_thread, None) {
+            handle.join().unwrap();
+        }
     }
 
     fn send_syn(raw: &Arc<platform::RawSocket>, local: tcp::Endpoint, remote: tcp::Endpoint) {

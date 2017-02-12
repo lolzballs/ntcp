@@ -83,5 +83,5 @@ fn main() {
     };
     create_client(raw.clone());
 
-    server.join();
+    server.join().unwrap();
 }
