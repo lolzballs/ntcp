@@ -191,7 +191,7 @@ impl Interface {
                    socket_send: &mpsc::Sender<Socket>,
                    tx_send: &mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
         let mut sockets = sockets.lock().unwrap();
-        let known = {
+        {
             if let Entry::Occupied(mut socket_entry) = sockets.entry(remote) {
                 match tcprepr.control {
                     tcp::Control::Rst => {
@@ -240,11 +240,9 @@ impl Interface {
                                  tcprepr.control)
                     }
                 }
-                true
-            } else {
-                false
             }
-        };
+        }
+
         if tcprepr.control == tcp::Control::Syn {
             if tcprepr.ack.is_none() {
                 Self::send_syn_ack(&raw, &tcp, local, remote);
