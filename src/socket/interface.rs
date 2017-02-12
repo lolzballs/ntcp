@@ -20,6 +20,7 @@ pub struct Interface {
     raw: Arc<platform::RawSocket>,
     sockets: Arc<Mutex<HashMap<tcp::Endpoint, (SocketState, Option<mpsc::Sender<PacketBuffer>>)>>>,
 
+    send_thread: Option<thread::JoinHandle<()>>,
     recv_thread: Option<thread::JoinHandle<()>>,
 }
 
@@ -31,6 +32,7 @@ impl Interface {
             raw: raw,
             sockets: Arc::new(Mutex::new(HashMap::new())),
 
+            send_thread: None,
             recv_thread: None,
         }
     }
@@ -55,7 +57,8 @@ impl Interface {
     pub fn start(&mut self, tx: mpsc::Sender<Socket>) {
         self.running.store(true, Ordering::Relaxed);
         let (tx_send, tx_recv) = mpsc::channel::<(tcp::Endpoint, PacketBuffer)>();
-        {
+
+        self.send_thread = Some({
             let running = self.running.clone();
             let local = self.endpoint;
             let raw = self.raw.clone();
@@ -64,8 +67,9 @@ impl Interface {
                     let buf = tx_recv.recv().unwrap();
                     Self::send(local, buf.0, &*buf.1.payload, &raw);
                 }
-            });
-        }
+            })
+        });
+
         self.recv_thread = Some({
             let running = self.running.clone();
             let endpoint = self.endpoint;
@@ -79,6 +83,11 @@ impl Interface {
 
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
+
+        let handle = match mem::replace(&mut self.send_thread, None) {
+            Some(handle) => handle.join(),
+            None => return,
+        };
 
         let handle = match mem::replace(&mut self.recv_thread, None) {
             Some(handle) => handle.join(),
@@ -359,5 +368,11 @@ impl Interface {
                                   &tx_send);
             }
         }
+    }
+}
+
+impl Drop for Interface {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
