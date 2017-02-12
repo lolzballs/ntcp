@@ -37,7 +37,7 @@ impl Interface {
         {
             let mut sockets = self.sockets.lock().unwrap();
             sockets.insert(remote, (SocketState::SynSent, None));
-            Self::send_syn(self.raw.clone(), self.endpoint, remote);
+            Self::send_syn(&self.raw, self.endpoint, remote);
         }
         rx.recv_timeout(Duration::from_secs(2)).map_err(|_| SocketError::Timeout)
     }
@@ -69,7 +69,7 @@ impl Interface {
         }
     }
 
-    fn send_syn(raw: Arc<platform::RawSocket>, local: tcp::Endpoint, remote: tcp::Endpoint) {
+    fn send_syn(raw: &Arc<platform::RawSocket>, local: tcp::Endpoint, remote: tcp::Endpoint) {
         let mut buf = [0; 40];
         let len = {
             let iprepr = ipv4::Repr {
@@ -104,7 +104,7 @@ impl Interface {
         raw.send(remote, &buf[..len]).unwrap();
     }
 
-    fn send_ack(raw: Arc<platform::RawSocket>,
+    fn send_ack(raw: &Arc<platform::RawSocket>,
                 recv: &tcp::Packet<&[u8]>,
                 local: tcp::Endpoint,
                 remote: tcp::Endpoint) {
@@ -142,7 +142,7 @@ impl Interface {
         raw.send(remote, &buf[..len]).unwrap();
     }
 
-    fn send_syn_ack(raw: Arc<platform::RawSocket>,
+    fn send_syn_ack(raw: &Arc<platform::RawSocket>,
                     recv: &tcp::Packet<&[u8]>,
                     local: tcp::Endpoint,
                     remote: tcp::Endpoint) {
@@ -180,6 +180,89 @@ impl Interface {
         raw.send(remote, &buf[..len]).unwrap();
     }
 
+    fn process_tcp(local: tcp::Endpoint,
+                   remote: tcp::Endpoint,
+                   tcp: tcp::Packet<&[u8]>,
+                   tcprepr: tcp::Repr,
+                   raw: &Arc<platform::RawSocket>,
+                   sockets: &Arc<Mutex<HashMap<tcp::Endpoint,
+                                               (SocketState,
+                                                Option<mpsc::Sender<PacketBuffer>>)>>>,
+                   socket_send: &mpsc::Sender<Socket>,
+                   tx_send: &mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
+        let mut sockets = sockets.lock().unwrap();
+        let known = {
+            if let Entry::Occupied(mut socket_entry) = sockets.entry(remote) {
+                match tcprepr.control {
+                    tcp::Control::Rst => {
+                        socket_entry.remove_entry();
+                    }
+                    tcp::Control::Syn => {
+                        let mut socket = socket_entry.get_mut();
+                        match socket.0 {
+                            SocketState::SynSent => {
+                                if tcprepr.ack.is_some() {
+                                    Self::send_ack(&raw, &tcp, local, remote);
+                                    let (rx_tx, rx_rx) = mpsc::channel();
+
+
+                                    socket_send.send(Socket::new(remote, rx_rx, tx_send.clone()))
+                                        .unwrap();
+                                    socket.0 = SocketState::Established;
+                                    socket.1 = Some(rx_tx);
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                    tcp::Control::None => {
+                        let mut socket = socket_entry.get_mut();
+                        match socket.0 {
+                            SocketState::SynSent => (),
+                            SocketState::SynReceived => {
+                                if tcprepr.ack.is_some() {
+                                    socket.0 = SocketState::Established;
+                                }
+                            }
+                            SocketState::Established => {
+                                let socket = match socket.1 {
+                                    Some(ref socket) => socket,
+                                    None => return,
+                                };
+                                socket.send(PacketBuffer::new(tcp.payload()))
+                                    .unwrap();
+                            }
+                            SocketState::Closed => (),
+                        };
+                    }
+                    _ => {
+                        println!("WARNING: Control flag not implemented({:?})",
+                                 tcprepr.control)
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        };
+        if !known {
+            if tcprepr.control == tcp::Control::Syn {
+                if tcprepr.ack.is_none() {
+
+                    Self::send_syn_ack(&raw, &tcp, local, remote);
+                    // Channel for sending packets
+                    let (rx_tx, rx_rx) = mpsc::channel();
+
+
+                    socket_send.send(Socket::new(remote, rx_rx, tx_send.clone()))
+                        .unwrap();
+                    sockets.insert(remote, (SocketState::SynReceived, Some(rx_tx)));
+                }
+            }
+        }
+
+    }
+
     fn recv(local: tcp::Endpoint,
             raw: Arc<platform::RawSocket>,
             sockets: Arc<Mutex<HashMap<tcp::Endpoint,
@@ -214,83 +297,16 @@ impl Interface {
                 }
             };
             if tcprepr.dst_port == local.port {
-                let endpoint = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
-                let mut sockets = sockets.lock().unwrap();
-                let known = {
-                    if let Entry::Occupied(mut socket_entry) = sockets.entry(endpoint) {
-                        match tcprepr.control {
-                            tcp::Control::Rst => {
-                                socket_entry.remove_entry();
-                            }
-                            tcp::Control::Syn => {
-                                let mut socket = socket_entry.get_mut();
-                                match socket.0 {
-                                    SocketState::SynSent => {
-                                        if tcprepr.ack.is_some() {
-                                            Self::send_ack(raw.clone(), &tcp, local, endpoint);
-                                            let (rx_tx, rx_rx) = mpsc::channel();
-
-
-                                            socket_send.send(Socket::new(endpoint,
-                                                                  rx_rx,
-                                                                  tx_send.clone()))
-                                                .unwrap();
-                                            socket.0 = SocketState::Established;
-                                            socket.1 = Some(rx_tx);
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                            tcp::Control::None => {
-                                let mut socket = socket_entry.get_mut();
-                                match socket.0 {
-                                    SocketState::SynSent => (),
-                                    SocketState::SynReceived => {
-                                        if tcprepr.ack.is_some() {
-                                            socket.0 = SocketState::Established;
-                                        }
-                                    }
-                                    SocketState::Established => {
-                                        let socket = match socket.1 {
-                                            Some(ref socket) => socket,
-                                            None => continue,
-                                        };
-                                        socket.send(PacketBuffer::new(tcp.payload()))
-                                            .unwrap();
-                                    }
-                                    SocketState::Closed => (),
-                                };
-                            }
-                            _ => {
-                                println!("WARNING: Control flag not implemented({:?})",
-                                         tcprepr.control)
-                            }
-                        }
-                        true
-                    } else {
-                        false
-                    }
-                };
-                if !known {
-                    if tcprepr.control == tcp::Control::Syn {
-                        if tcprepr.ack.is_none() {
-
-                            Self::send_syn_ack(raw.clone(),
-                                               &tcp,
-                                               tcp::Endpoint::new(iprepr.dst_addr,
-                                                                  tcprepr.dst_port),
-                                               endpoint);
-                            // Channel for sending packets
-                            let (rx_tx, rx_rx) = mpsc::channel();
-
-
-                            socket_send.send(Socket::new(endpoint, rx_rx, tx_send.clone()))
-                                .unwrap();
-                            sockets.insert(endpoint, (SocketState::SynReceived, Some(rx_tx)));
-                        }
-                    }
-                }
+                let local = tcp::Endpoint::new(iprepr.dst_addr, tcprepr.dst_port);
+                let remote = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
+                Self::process_tcp(local,
+                                  remote,
+                                  tcp,
+                                  tcprepr,
+                                  &raw,
+                                  &sockets,
+                                  &socket_send,
+                                  &tx_send);
             }
         }
     }
