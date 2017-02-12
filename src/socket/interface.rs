@@ -245,17 +245,16 @@ impl Interface {
                 false
             }
         };
-        if !known {
-            if tcprepr.control == tcp::Control::Syn {
-                if tcprepr.ack.is_none() {
-                    Self::send_syn_ack(&raw, &tcp, local, remote);
-                    // Channel for sending packets
-                    let (rx_tx, rx_rx) = mpsc::channel();
+        if tcprepr.control == tcp::Control::Syn {
+            if tcprepr.ack.is_none() {
+                Self::send_syn_ack(&raw, &tcp, local, remote);
 
-                    socket_send.send(Socket::new(remote, rx_rx, tx_send.clone()))
-                        .unwrap();
-                    sockets.insert(remote, (SocketState::SynReceived, Some(rx_tx)));
-                }
+                // Channel for sending packets
+                let (rx_tx, rx_rx) = mpsc::channel();
+
+                socket_send.send(Socket::new(remote, rx_rx, tx_send.clone()))
+                    .unwrap();
+                sockets.insert(remote, (SocketState::SynReceived, Some(rx_tx)));
             }
         }
     }
