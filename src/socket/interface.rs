@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::mem;
 use std::sync::{Arc, Mutex, mpsc};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -13,25 +15,29 @@ use ::error::{Error, SocketError};
 const RECV_BUF_LEN: usize = 2048;
 
 pub struct Interface {
-    listening: bool,
+    running: Arc<AtomicBool>,
     endpoint: tcp::Endpoint,
     raw: Arc<platform::RawSocket>,
     sockets: Arc<Mutex<HashMap<tcp::Endpoint, (SocketState, Option<mpsc::Sender<PacketBuffer>>)>>>,
+
+    recv_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Interface {
     pub fn new(endpoint: tcp::Endpoint, raw: Arc<platform::RawSocket>) -> Self {
         Interface {
-            listening: false,
+            running: Arc::new(AtomicBool::new(false)),
             endpoint: endpoint,
             raw: raw,
             sockets: Arc::new(Mutex::new(HashMap::new())),
+
+            recv_thread: None,
         }
     }
 
     pub fn connect(&mut self, remote: tcp::Endpoint) -> Result<Socket, SocketError> {
         let (tx, rx) = mpsc::channel::<Socket>();
-        if !self.listening {
+        if !self.running.load(Ordering::Relaxed) {
             self.start(tx);
         }
         {
@@ -47,26 +53,37 @@ impl Interface {
     }
 
     pub fn start(&mut self, tx: mpsc::Sender<Socket>) {
-        self.listening = true;
+        self.running.store(true, Ordering::Relaxed);
         let (tx_send, tx_recv) = mpsc::channel::<(tcp::Endpoint, PacketBuffer)>();
         {
+            let running = self.running.clone();
+            let local = self.endpoint;
             let raw = self.raw.clone();
             thread::spawn(move || {
-                loop {
+                while running.load(Ordering::Relaxed) {
                     let buf = tx_recv.recv().unwrap();
-                    println!("TODO: send {:?}", buf);
-                    raw.send(buf.0, &*buf.1.payload).unwrap();
+                    Self::send(local, buf.0, &*buf.1.payload, &raw);
                 }
             });
         }
-        {
+        self.recv_thread = Some({
+            let running = self.running.clone();
             let endpoint = self.endpoint;
             let raw = self.raw.clone();
             let sockets = self.sockets.clone();
             thread::spawn(move || {
-                Self::recv(endpoint, raw, sockets, tx, tx_send);
-            });
-        }
+                Self::recv(running, endpoint, raw, sockets, tx, tx_send);
+            })
+        });
+    }
+
+    pub fn stop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+
+        let handle = match mem::replace(&mut self.recv_thread, None) {
+            Some(handle) => handle.join(),
+            None => return,
+        };
     }
 
     fn send_syn(raw: &Arc<platform::RawSocket>, local: tcp::Endpoint, remote: tcp::Endpoint) {
@@ -180,6 +197,44 @@ impl Interface {
         raw.send(remote, &buf[..len]).unwrap();
     }
 
+    fn send(local: tcp::Endpoint,
+            remote: tcp::Endpoint,
+            payload: &[u8],
+            raw: &Arc<platform::RawSocket>) {
+        let mut buf = vec![0; 40 + payload.len()];
+        let len = {
+            let iprepr = ipv4::Repr {
+                src_addr: local.addr,
+                dst_addr: remote.addr,
+                payload_len: 20 + payload.len(),
+            };
+            let mut ip = ipv4::Packet::new(&mut buf[..]).unwrap();
+            {
+                iprepr.send(&mut ip);
+            }
+            {
+                let mut tcp = tcp::Packet::new(&mut ip.payload_mut()[..iprepr.payload_len])
+                    .unwrap();
+
+                let tcprepr = tcp::Repr {
+                    src_port: local.port,
+                    dst_port: remote.port,
+                    seq: 123123,
+                    ack: None,
+                    control: tcp::Control::None,
+                    payload: payload,
+                };
+
+                tcprepr.emit(&mut tcp, &local.addr, &remote.addr);
+            }
+
+            let total_len = ip.total_len() as usize;
+            total_len
+        };
+
+        raw.send(remote, &buf[..len]).unwrap();
+    }
+
     fn process_tcp(local: tcp::Endpoint,
                    remote: tcp::Endpoint,
                    tcp: tcp::Packet<&[u8]>,
@@ -257,13 +312,14 @@ impl Interface {
         }
     }
 
-    fn recv(local: tcp::Endpoint,
+    fn recv(running: Arc<AtomicBool>,
+            local: tcp::Endpoint,
             raw: Arc<platform::RawSocket>,
             sockets: Arc<Mutex<HashMap<tcp::Endpoint,
                                        (SocketState, Option<mpsc::Sender<PacketBuffer>>)>>>,
             socket_send: mpsc::Sender<Socket>,
             tx_send: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
-        loop {
+        while running.load(Ordering::Relaxed) {
             let mut buf = [0; RECV_BUF_LEN];
             let len = raw.recv(&mut buf).unwrap_or(0);
             if len == 0 {
