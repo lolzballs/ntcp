@@ -22,6 +22,9 @@ fn create_client(raw: Arc<platform::RawSocket>) {
             .unwrap();
     println!("{:?}", socket);
     socket.send(socket::PacketBuffer::new(&[69, 4, 20])).unwrap();
+
+    println!("Recieved: {:?}", socket.recv());
+
     thread::sleep(Duration::from_secs(2));
     socket.send(socket::PacketBuffer::new(&[69, 69, 69, 69])).unwrap();
 }
@@ -53,6 +56,8 @@ fn create_server(raw: Arc<platform::RawSocket>) -> thread::JoinHandle<()> {
 
                     if packet.payload.len() == 4 {
                         running.store(false, Ordering::Relaxed);
+                    } else {
+                        socket.send(socket::PacketBuffer::new(&[4, 20, 4, 20])).unwrap();
                     }
                     println!("{:?}", packet);
                 }
