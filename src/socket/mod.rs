@@ -1,15 +1,9 @@
 mod interface;
 
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread;
-use std::time::Duration;
+use std::sync::mpsc;
 
-use ::error::{Error, SocketError};
-use ::ipv4;
+use ::error::SocketError;
 use ::tcp;
-use ::platform;
 
 pub use self::interface::Interface as SocketInterface;
 

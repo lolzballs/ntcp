@@ -336,6 +336,12 @@ impl<'a, T: AsRef<[u8]> + AsMut<[u8]> + ?Sized> Packet<&'a mut T> {
         let mut buf = self.buffer.as_mut();
         &mut buf[len..]
     }
+
+    #[inline]
+    pub fn options(&mut self) -> &mut [u8] {
+        let mut buf = self.buffer.as_mut();
+        &mut buf[field::URGENT.end..]
+    }
 }
 
 impl<T: AsRef<[u8]>> fmt::Debug for Packet<T> {
@@ -446,6 +452,7 @@ impl<'a> Repr<'a> {
         if self.ack.is_some() {
             packet.set_flag_ack(true);
         }
+
         packet.payload().copy_from_slice(self.payload);
         packet.fill_checksum(src_addr, dst_addr);
     }

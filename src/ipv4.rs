@@ -201,7 +201,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_df(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         buf[field::FLG_OFF.start] = (buf[field::FLG_OFF.start] & !0x40) |
-                                    ((if flag { 1 << 7 } else { 0 }));
+                                    ((if flag { 1 << 6 } else { 0 }));
     }
 
     /// More Fragments (MF) flag
@@ -209,7 +209,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_flag_mf(&mut self, flag: bool) {
         let mut buf = self.buffer.as_mut();
         buf[field::FLG_OFF.start] = (buf[field::FLG_OFF.start] & !0x20) |
-                                    ((if flag { 1 << 6 } else { 0 }));
+                                    ((if flag { 1 << 5 } else { 0 }));
     }
 
     #[inline]

@@ -248,11 +248,9 @@ impl Interface {
         if !known {
             if tcprepr.control == tcp::Control::Syn {
                 if tcprepr.ack.is_none() {
-
                     Self::send_syn_ack(&raw, &tcp, local, remote);
                     // Channel for sending packets
                     let (rx_tx, rx_rx) = mpsc::channel();
-
 
                     socket_send.send(Socket::new(remote, rx_rx, tx_send.clone()))
                         .unwrap();
@@ -260,7 +258,6 @@ impl Interface {
                 }
             }
         }
-
     }
 
     fn recv(local: tcp::Endpoint,
