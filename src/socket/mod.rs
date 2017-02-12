@@ -9,7 +9,7 @@ pub use self::interface::Interface as SocketInterface;
 
 #[derive(Debug)]
 pub struct PacketBuffer {
-    payload: Box<[u8]>,
+    pub payload: Box<[u8]>,
 }
 
 impl PacketBuffer {
@@ -24,24 +24,6 @@ enum SocketState {
     SynReceived,
     Established,
     Closed,
-}
-
-pub struct ServerSocket {
-    interface: SocketInterface,
-    tx_socket: mpsc::Sender<Socket>,
-}
-
-impl ServerSocket {
-    pub fn new(interface: SocketInterface, tx_socket: mpsc::Sender<Socket>) -> Self {
-        ServerSocket {
-            interface: interface,
-            tx_socket: tx_socket,
-        }
-    }
-
-    pub fn listen(mut self) {
-        self.interface.listen(self.tx_socket);
-    }
 }
 
 #[derive(Debug)]

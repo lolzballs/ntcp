@@ -370,9 +370,3 @@ impl Interface {
         }
     }
 }
-
-impl Drop for Interface {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
