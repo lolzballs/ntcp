@@ -2,7 +2,7 @@ extern crate byteorder;
 extern crate core;
 extern crate libc;
 
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -36,17 +36,16 @@ fn create_server(raw: Arc<platform::RawSocket>) -> thread::JoinHandle<()> {
     interface.listen(tx);
 
     thread::spawn(move || {
-        let running = Arc::new(AtomicBool::new(true));
+        let interface = Arc::new(Mutex::new(interface));
         println!("Server starting...");
 
-        while running.load(Ordering::Relaxed) {
-            let mut socket = match rx.try_recv() {
+        loop {
+            let mut socket = match rx.recv() {
                 Ok(socket) => socket,
-                Err(mpsc::TryRecvError::Empty) => continue,
                 Err(_) => break,
             };
+            let interface = interface.clone();
             println!("Connection established with: {:?}", socket.endpoint);
-            let running = running.clone();
             thread::spawn(move || {
                 loop {
                     let packet = match socket.recv() {
@@ -55,7 +54,7 @@ fn create_server(raw: Arc<platform::RawSocket>) -> thread::JoinHandle<()> {
                     };
 
                     if packet.payload.len() == 4 {
-                        running.store(false, Ordering::Relaxed);
+                        interface.lock().unwrap().stop();
                     } else {
                         socket.send(socket::PacketBuffer::new(&[4, 20, 4, 20])).unwrap();
                     }

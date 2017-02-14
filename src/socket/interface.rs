@@ -50,6 +50,11 @@ impl Interface {
         rx.recv_timeout(Duration::from_secs(2)).map_err(|_| SocketError::Timeout)
     }
 
+    pub fn close(&mut self, remote: tcp::Endpoint) {
+        let mut sockets = self.sockets.lock().unwrap();
+        sockets.remove(&remote);
+    }
+
     pub fn listen(&mut self, tx: mpsc::Sender<Socket>) {
         self.start(tx);
     }
