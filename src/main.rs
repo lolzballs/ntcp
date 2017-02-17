@@ -13,7 +13,7 @@ mod tcp;
 mod platform;
 mod socket;
 
-fn create_client(raw: Arc<platform::RawSocket>) {
+fn create_client(raw: platform::RawSocket) {
     let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 8090);
     let mut interface = socket::SocketInterface::new(endpoint, raw);
 
@@ -29,7 +29,7 @@ fn create_client(raw: Arc<platform::RawSocket>) {
     socket.send(socket::PacketBuffer::new(&[69, 69, 69, 69])).unwrap();
 }
 
-fn create_server(raw: Arc<platform::RawSocket>) -> thread::JoinHandle<()> {
+fn create_server(raw: platform::RawSocket) -> thread::JoinHandle<()> {
     let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 6969);
     let mut interface = socket::SocketInterface::new(endpoint, raw);
     let (tx, rx) = mpsc::channel();
@@ -70,17 +70,17 @@ fn create_server(raw: Arc<platform::RawSocket>) -> thread::JoinHandle<()> {
 
 fn main() {
     let raw = match platform::RawSocket::new() {
-        Ok(socket) => Arc::new(socket),
+        Ok(socket) => socket,
         Err(error) => panic!("Error creating RawSocket: {}", error),
     };
 
-    let server = create_server(raw.clone());
+    let server = create_server(raw);
 
     let raw = match platform::RawSocket::new() {
-        Ok(socket) => Arc::new(socket),
+        Ok(socket) => socket,
         Err(error) => panic!("Error creating RawSocket: {}", error),
     };
-    create_client(raw.clone());
+    create_client(raw);
 
     server.join().unwrap();
 }

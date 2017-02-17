@@ -27,11 +27,11 @@ pub struct Interface {
 }
 
 impl Interface {
-    pub fn new(endpoint: tcp::Endpoint, raw: Arc<platform::RawSocket>) -> Self {
+    pub fn new(endpoint: tcp::Endpoint, raw: platform::RawSocket) -> Self {
         Interface {
             running: Arc::new(AtomicBool::new(false)),
             endpoint: endpoint,
-            raw: raw,
+            raw: Arc::new(raw),
             sockets: Arc::new(Mutex::new(HashMap::new())),
 
             send_thread: None,
