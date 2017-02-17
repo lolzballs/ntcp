@@ -14,11 +14,13 @@ use ::error::{Error, SocketError};
 
 const RECV_BUF_LEN: usize = 2048;
 
+type SocketMap = HashMap<tcp::Endpoint, (SocketState, Option<mpsc::Sender<PacketBuffer>>)>;
+
 pub struct Interface {
     running: Arc<AtomicBool>,
     endpoint: tcp::Endpoint,
     raw: Arc<platform::RawSocket>,
-    sockets: Arc<Mutex<HashMap<tcp::Endpoint, (SocketState, Option<mpsc::Sender<PacketBuffer>>)>>>,
+    sockets: Arc<Mutex<SocketMap>>,
 
     send_thread: Option<thread::JoinHandle<()>>,
     recv_thread: Option<thread::JoinHandle<()>>,
@@ -70,7 +72,7 @@ impl Interface {
             thread::spawn(move || {
                 while running.load(Ordering::Relaxed) {
                     let buf = tx_recv.recv().unwrap();
-                    Self::send(local, buf.0, &*buf.1.payload, &raw);
+                    Self::send(&raw, local, buf.0, &*buf.1.payload);
                 }
             })
         });
@@ -81,7 +83,7 @@ impl Interface {
             let raw = self.raw.clone();
             let sockets = self.sockets.clone();
             thread::spawn(move || {
-                Self::recv(running, endpoint, raw, sockets, tx, tx_send);
+                Self::recv(raw, running, endpoint, sockets, tx, tx_send);
             })
         });
     }
@@ -209,10 +211,10 @@ impl Interface {
         raw.send(remote, &buf[..len]).unwrap();
     }
 
-    fn send(local: tcp::Endpoint,
+    fn send(raw: &Arc<platform::RawSocket>,
+            local: tcp::Endpoint,
             remote: tcp::Endpoint,
-            payload: &[u8],
-            raw: &Arc<platform::RawSocket>) {
+            payload: &[u8]) {
         let mut buf = vec![0; 40 + payload.len()];
         let len = {
             let iprepr = ipv4::Repr {
@@ -247,14 +249,12 @@ impl Interface {
         raw.send(remote, &buf[..len]).unwrap();
     }
 
-    fn process_tcp(local: tcp::Endpoint,
+    fn process_tcp(raw: &Arc<platform::RawSocket>,
+                   local: tcp::Endpoint,
                    remote: tcp::Endpoint,
                    tcp: tcp::Packet<&[u8]>,
                    tcprepr: tcp::Repr,
-                   raw: &Arc<platform::RawSocket>,
-                   sockets: &Arc<Mutex<HashMap<tcp::Endpoint,
-                                               (SocketState,
-                                                Option<mpsc::Sender<PacketBuffer>>)>>>,
+                   sockets: &Arc<Mutex<SocketMap>>,
                    socket_send: &mpsc::Sender<Socket>,
                    tx_send: &mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
         let mut sockets = sockets.lock().unwrap();
@@ -324,11 +324,10 @@ impl Interface {
         }
     }
 
-    fn recv(running: Arc<AtomicBool>,
+    fn recv(raw: Arc<platform::RawSocket>,
+            running: Arc<AtomicBool>,
             local: tcp::Endpoint,
-            raw: Arc<platform::RawSocket>,
-            sockets: Arc<Mutex<HashMap<tcp::Endpoint,
-                                       (SocketState, Option<mpsc::Sender<PacketBuffer>>)>>>,
+            sockets: Arc<Mutex<SocketMap>>,
             socket_send: mpsc::Sender<Socket>,
             tx_send: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
         while running.load(Ordering::Relaxed) {
@@ -361,11 +360,11 @@ impl Interface {
             if tcprepr.dst_port == local.port {
                 let local = tcp::Endpoint::new(iprepr.dst_addr, tcprepr.dst_port);
                 let remote = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
-                Self::process_tcp(local,
+                Self::process_tcp(&raw,
+                                  local,
                                   remote,
                                   tcp,
                                   tcprepr,
-                                  &raw,
                                   &sockets,
                                   &socket_send,
                                   &tx_send);
