@@ -21,7 +21,7 @@ impl Endpoint {
 }
 
 pub struct Packet<T: AsRef<[u8]>> {
-    pub buffer: T,
+    buffer: T,
 }
 
 mod field {
