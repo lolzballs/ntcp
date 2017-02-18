@@ -2,7 +2,7 @@ extern crate byteorder;
 extern crate core;
 extern crate libc;
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -21,14 +21,14 @@ fn create_client(raw: platform::RawSocket) {
     let mut socket =
         interface.connect(tcp::Endpoint::new(ipv4::Address::from_bytes(&[127, 0, 0, 1]), 6969))
             .unwrap();
-    socket.send(socket::PacketBuffer::new(&[69, 4, 20])).unwrap();
+    socket.write(&[69, 4, 20]).unwrap();
 
     let mut buf = [0; 1024];
     let len = socket.read(&mut buf).unwrap();
     println!("Client recieved: {:?}", &buf[..len]);
 
     thread::sleep(Duration::from_secs(2));
-    socket.send(socket::PacketBuffer::new(&[69, 69, 69, 69])).unwrap();
+    socket.write(&[69, 69, 69, 69]).unwrap();
 }
 
 fn create_server(raw: platform::RawSocket) -> thread::JoinHandle<()> {
@@ -60,7 +60,7 @@ fn create_server(raw: platform::RawSocket) -> thread::JoinHandle<()> {
                     if packet.len() == 4 {
                         interface.lock().unwrap().stop();
                     } else {
-                        socket.send(socket::PacketBuffer::new(&[4, 20, 4, 20])).unwrap();
+                        socket.write(&[4, 20, 4, 20]).unwrap();
                     }
                 }
                 println!("Connection closed with: {:?}", socket.endpoint);
