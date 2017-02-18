@@ -12,7 +12,7 @@ use ntcp::tcp;
 
 fn create_client(tx: mpsc::Sender<Vec<u8>>, rx: mpsc::Receiver<Vec<u8>>) {
     let raw = RawSocket::new().unwrap();
-    let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 6969);
+    let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 8090);
     let mut interface = SocketInterface::new(endpoint, raw);
 
     let mut socket =
@@ -25,12 +25,14 @@ fn create_client(tx: mpsc::Sender<Vec<u8>>, rx: mpsc::Receiver<Vec<u8>>) {
     thread::spawn(move || {
         loop {
             let packet = rx.recv().unwrap();
+            println!("Recieved: {:?}", &packet);
             socket_tx.send((endpoint, PacketBuffer::new(&packet))).unwrap();
         }
     });
     thread::spawn(move || {
         loop {
             let packet = socket_rx.recv().unwrap();
+            println!("Sent: {:?}", &packet.payload);
             tx.send((*packet.payload).to_vec());
         }
     });
@@ -54,6 +56,7 @@ fn main() {
                 thread::spawn(move || {
                     loop {
                         let packet = send_rx.recv().unwrap();
+                        println!("{:?}", &packet);
                         socket.send_to(&packet, src).unwrap();
                     }
                 });
