@@ -1,18 +1,14 @@
-extern crate byteorder;
-extern crate core;
-extern crate libc;
+extern crate ntcp;
 
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, mpsc};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-mod error;
-mod ipv4;
-mod tcp;
-mod platform;
-mod socket;
+use ntcp::ipv4;
+use ntcp::platform;
+use ntcp::socket;
+use ntcp::tcp;
 
 fn create_client(raw: platform::RawSocket) {
     let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 8090);
