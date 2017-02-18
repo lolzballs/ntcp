@@ -1,11 +1,10 @@
 mod interface;
-
-use std::sync::mpsc;
+mod socket;
 
 use ::error::SocketError;
-use ::tcp;
 
 pub use self::interface::Interface as SocketInterface;
+pub use self::socket::Socket;
 
 #[derive(Debug)]
 pub struct PacketBuffer {
@@ -24,32 +23,4 @@ enum SocketState {
     SynReceived,
     Established,
     Closed,
-}
-
-#[derive(Debug)]
-pub struct Socket {
-    pub endpoint: tcp::Endpoint,
-    rx: mpsc::Receiver<PacketBuffer>,
-    tx: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>,
-}
-
-impl Socket {
-    pub fn new(endpoint: tcp::Endpoint,
-               rx: mpsc::Receiver<PacketBuffer>,
-               tx: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>)
-               -> Self {
-        Socket {
-            endpoint: endpoint,
-            rx: rx,
-            tx: tx,
-        }
-    }
-
-    pub fn recv(&mut self) -> Result<PacketBuffer, SocketError> {
-        self.rx.recv().map_err(|_| SocketError::Closed)
-    }
-
-    pub fn send(&mut self, buf: PacketBuffer) -> Result<(), SocketError> {
-        self.tx.send((self.endpoint, buf)).map_err(|_| SocketError::Closed)
-    }
 }
