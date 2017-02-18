@@ -34,6 +34,12 @@ impl Socket {
     fn send(&mut self, buf: PacketBuffer) -> Result<(), SocketError> {
         self.tx.send((self.endpoint, buf)).map_err(|_| SocketError::Closed)
     }
+
+    pub fn to_tx_rx
+        (self)
+         -> (mpsc::Sender<(tcp::Endpoint, PacketBuffer)>, mpsc::Receiver<PacketBuffer>) {
+        (self.tx, self.rx)
+    }
 }
 
 impl io::Write for Socket {

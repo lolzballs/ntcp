@@ -3,6 +3,9 @@ name = "ntcp"
 version = "0.1.0"
 authors = ["Benjamin Cheng <ben@bcheng.cf>"]
 
+[workspace]
+members = ["examples/tunnel_client", "examples/tunnel_server"]
+
 [dependencies]
 byteorder = "1"
 libc = "0.2"
