@@ -158,7 +158,7 @@ impl Interface {
                 let tcprepr = tcp::Repr {
                     src_port: local.port,
                     dst_port: remote.port,
-                    seq: recv.ack_num() + 1,
+                    seq: recv.ack_num(),
                     ack: Some(recv.seq_num() + 1),
                     control: tcp::Control::None,
                     payload: &[],
@@ -293,7 +293,7 @@ impl Interface {
                                         .unwrap();
                                     socket.0 = SocketState::Established {
                                         seq: tcprepr.ack.unwrap(),
-                                        ack: tcprepr.seq,
+                                        ack: tcprepr.seq + 1,
                                     };
                                     println!("SEQ: {}, ACK: {:?}",
                                              tcprepr.ack.unwrap(),
