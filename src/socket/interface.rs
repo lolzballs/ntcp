@@ -69,10 +69,11 @@ impl Interface {
             let running = self.running.clone();
             let local = self.endpoint;
             let raw = self.raw.clone();
+            let mut sockets = self.sockets.clone();
             thread::spawn(move || {
                 while running.load(Ordering::Relaxed) {
                     let buf = tx_recv.recv().unwrap();
-                    Self::send(&raw, local, buf.0, &*buf.1.payload);
+                    Self::send(&raw, &mut sockets, local, buf.0, &*buf.1.payload);
                 }
             })
         });
@@ -212,6 +213,7 @@ impl Interface {
     }
 
     fn send(raw: &Arc<platform::RawSocket>,
+            sockets: &Arc<Mutex<SocketMap>>,
             local: tcp::Endpoint,
             remote: tcp::Endpoint,
             payload: &[u8]) {
@@ -230,11 +232,24 @@ impl Interface {
                 let mut tcp = tcp::Packet::new(&mut ip.payload_mut()[..iprepr.payload_len])
                     .unwrap();
 
+                let (seq, ack) = {
+                    let mut sockets = sockets.lock().unwrap();
+                    if let SocketState::Established { seq: ref mut seq, ack: ref mut ack } =
+                        sockets.get_mut(&remote).unwrap().0 {
+                        let seqack = (*seq, *ack);
+                        println!("SEQ: {}, ACK: {:?}", seq, ack);
+                        *seq += payload.len() as u32;
+                        seqack
+                    } else {
+                        return;
+                    }
+                };
+
                 let tcprepr = tcp::Repr {
                     src_port: local.port,
                     dst_port: remote.port,
-                    seq: 123123,
-                    ack: None,
+                    seq: seq,
+                    ack: Some(ack),
                     control: tcp::Control::None,
                     payload: payload,
                 };
@@ -267,6 +282,7 @@ impl Interface {
                     tcp::Control::Syn => {
                         let mut socket = socket_entry.get_mut();
                         match socket.0 {
+                            // SYN-ACK of handshake
                             SocketState::SynSent => {
                                 if tcprepr.ack.is_some() {
                                     Self::send_ack(&raw, &tcp, local, remote);
@@ -275,7 +291,13 @@ impl Interface {
 
                                     socket_send.send(Socket::new(remote, rx_rx, tx_send.clone()))
                                         .unwrap();
-                                    socket.0 = SocketState::Established;
+                                    socket.0 = SocketState::Established {
+                                        seq: tcprepr.ack.unwrap(),
+                                        ack: tcprepr.seq,
+                                    };
+                                    println!("SEQ: {}, ACK: {:?}",
+                                             tcprepr.ack.unwrap(),
+                                             tcprepr.seq);
                                     socket.1 = Some(rx_tx);
                                 }
                             }
@@ -286,16 +308,24 @@ impl Interface {
                         let mut socket = socket_entry.get_mut();
                         match socket.0 {
                             SocketState::SynSent => (),
+                            // ACK in response to SYN-ACK
                             SocketState::SynReceived => {
                                 if tcprepr.ack.is_some() {
-                                    socket.0 = SocketState::Established;
+                                    socket.0 = SocketState::Established {
+                                        seq: tcprepr.ack.unwrap(),
+                                        ack: tcprepr.seq,
+                                    };
+                                    println!("SEQ: {}, ACK: {:?}",
+                                             tcprepr.ack.unwrap(),
+                                             tcprepr.seq);
                                 }
                             }
-                            SocketState::Established => {
+                            SocketState::Established { ack: ref mut ack, seq: seq } => {
                                 let socket = match socket.1 {
                                     Some(ref socket) => socket,
                                     None => return,
                                 };
+                                *ack += tcp.payload().len() as u32;
                                 socket.send(PacketBuffer::new(tcp.payload()))
                                     .unwrap();
                             }
@@ -310,6 +340,7 @@ impl Interface {
             }
         }
 
+        // Initial SYN in handshake
         if tcprepr.control == tcp::Control::Syn {
             if tcprepr.ack.is_none() {
                 Self::send_syn_ack(&raw, &tcp, local, remote);

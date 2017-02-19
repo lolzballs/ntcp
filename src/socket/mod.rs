@@ -21,6 +21,6 @@ impl PacketBuffer {
 enum SocketState {
     SynSent,
     SynReceived,
-    Established,
+    Established { seq: u32, ack: u32 },
     Closed,
 }
