@@ -2,6 +2,8 @@ use std::cmp;
 use std::io;
 use std::mem;
 use std::ptr;
+use std::slice;
+use std::time::Instant;
 
 use tcp;
 use super::if_packet::*;
@@ -12,6 +14,45 @@ const ETH_P_IP: u16 = 0x0800;
 
 const RING_FRAME_CNT: usize = 7;
 const RING_FRAME_LEN: usize = 262224;
+
+pub struct MappedBuffer {
+    base: *mut libc::c_void,
+}
+
+impl Default for MappedBuffer {
+    fn default() -> Self {
+        MappedBuffer { base: ptr::null_mut() }
+    }
+}
+
+impl Drop for MappedBuffer {
+    fn drop(&mut self) {
+        if self.is_null() {
+            return;
+        }
+        unsafe {
+            (&mut *(self.base as *mut tpacket_hdr)).tp_status = 0;
+        }
+    }
+}
+
+impl MappedBuffer {
+    pub fn is_null(&self) -> bool {
+        self.base.is_null()
+    }
+
+    pub fn header(&self) -> &tpacket_hdr {
+        unsafe { &*(self.base as *const tpacket_hdr) }
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        let len = self.header().tp_len;
+        unsafe {
+            slice::from_raw_parts(self.base.offset(TPACKET_HDR_LEN as isize) as *const u8,
+                                  len as usize)
+        }
+    }
+}
 
 unsafe impl Send for RawSocket {}
 unsafe impl Sync for RawSocket {}
@@ -112,7 +153,7 @@ impl RawSocket {
         Ok(sockfd)
     }
 
-    pub fn recv(&self, index: usize, buffer: &mut [u8]) -> io::Result<usize> {
+    pub fn recv(&self, index: usize) -> io::Result<MappedBuffer> {
         let index = index % RING_FRAME_CNT;
         let mut header = unsafe {
             // TODO: Some checking
@@ -132,19 +173,7 @@ impl RawSocket {
             }
         }
 
-        let len = unsafe {
-            let len = header.tp_len as usize;
-            let header = header as *const tpacket_hdr as *const _;
-            ptr::copy(header.offset(TPACKET_HDR_LEN as isize),
-                      buffer.as_mut_ptr(),
-                      cmp::max(len, buffer.len()));
-            len
-        };
-
-        // Return to kernel
-        header.tp_status = 0;
-
-        Ok(len)
+        Ok(MappedBuffer { base: header as *mut tpacket_hdr as *mut libc::c_void })
     }
 
     pub fn send(&self, dest: tcp::Endpoint, buffer: &[u8]) -> io::Result<usize> {

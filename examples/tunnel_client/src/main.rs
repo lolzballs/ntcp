@@ -45,7 +45,6 @@ fn main() {
         let mut buf = [0; 17000];
         let (len, src) = socket.recv_from(&mut buf).unwrap();
 
-        println!("{}", len);
         let tx = sockets
             .entry(src)
             .or_insert_with(|| {
