@@ -3,7 +3,7 @@ use std::io;
 use std::sync::mpsc;
 
 use super::{PacketBuffer, SocketError};
-use ::tcp;
+use tcp;
 
 #[derive(Debug)]
 pub struct Socket {
@@ -32,7 +32,9 @@ impl Socket {
     }
 
     fn send(&mut self, buf: PacketBuffer) -> Result<(), SocketError> {
-        self.tx.send((self.endpoint, buf)).map_err(|_| SocketError::Closed)
+        self.tx
+            .send((self.endpoint, buf))
+            .map_err(|_| SocketError::Closed)
     }
 
     pub fn to_tx_rx
@@ -44,12 +46,12 @@ impl Socket {
 
 impl io::Write for Socket {
     fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
-        self.send(PacketBuffer::new(buf)).map(|_| buf.len()).map_err(|err| {
-            match err {
-                SocketError::Closed => io::Error::from(io::ErrorKind::NotConnected),
-                _ => io::Error::new(io::ErrorKind::Other, "Something else"),
-            }
-        })
+        self.send(PacketBuffer::new(buf))
+            .map(|_| buf.len())
+            .map_err(|err| match err {
+                         SocketError::Closed => io::Error::from(io::ErrorKind::NotConnected),
+                         _ => io::Error::new(io::ErrorKind::Other, "Something else"),
+                     })
     }
 
     fn flush(&mut self) -> Result<(), io::Error> {
@@ -79,16 +81,15 @@ impl io::Read for Socket {
                 buf.copy_from_slice(&recv.payload[..len]);
 
                 if len > buf.len() {
-                    self.rx_buffer.extend_from_slice(&recv.payload[buf.len()..]);
+                    self.rx_buffer
+                        .extend_from_slice(&recv.payload[buf.len()..]);
                 }
 
                 read_len + buf.len()
             })
-            .map_err(|err| {
-                match err {
-                    SocketError::Closed => io::Error::from(io::ErrorKind::NotConnected),
-                    _ => io::Error::new(io::ErrorKind::Other, "Something else"),
-                }
-            })
+            .map_err(|err| match err {
+                         SocketError::Closed => io::Error::from(io::ErrorKind::NotConnected),
+                         _ => io::Error::new(io::ErrorKind::Other, "Something else"),
+                     })
     }
 }

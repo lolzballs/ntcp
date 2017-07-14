@@ -46,6 +46,7 @@ mod field {
 
 impl<T: AsRef<[u8]>> Packet<T> {
     pub fn new(buffer: T) -> Result<Self, Error> {
+        return Ok(Packet { buffer: buffer });
         let len = buffer.as_ref().len();
         if len < field::DST_ADDR.end {
             Err(Error::Truncated)
@@ -283,6 +284,10 @@ impl Repr {
             return Err(Error::Malformed);
         }
 
+        if packet.protocol() != TCP_PROTOCOL {
+            return Err(Error::UnknownProtocol);
+        }
+
         if packet.header_len() > 20 {
             return Err(Error::Unrecognized);
         }
@@ -291,13 +296,9 @@ impl Repr {
             return Err(Error::Fragmented);
         }
 
-        if packet.protocol() != TCP_PROTOCOL {
-            return Err(Error::UnknownProtocol);
-        }
-
-        if !packet.checksum_valid() {
-            return Err(Error::Checksum);
-        }
+        //if !packet.checksum_valid() {
+        //    return Err(Error::Checksum);
+        //}
 
         let payload_len = packet.total_len() as usize - packet.header_len() as usize;
         if packet.payload().len() < payload_len {
@@ -305,10 +306,10 @@ impl Repr {
         }
 
         Ok(Repr {
-            src_addr: packet.src_addr(),
-            dst_addr: packet.dst_addr(),
-            payload_len: payload_len,
-        })
+               src_addr: packet.src_addr(),
+               dst_addr: packet.dst_addr(),
+               payload_len: payload_len,
+           })
     }
 
     pub fn send<T: AsRef<[u8]> + AsMut<[u8]>>(&self, packet: &mut Packet<T>) {

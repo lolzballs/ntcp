@@ -417,13 +417,13 @@ impl<'a> Repr<'a> {
         };
 
         Ok(Repr {
-            src_port: packet.src_port(),
-            dst_port: packet.dst_port(),
-            seq: packet.seq_num(),
-            ack: ack_num,
-            control: control,
-            payload: packet.payload(),
-        })
+               src_port: packet.src_port(),
+               dst_port: packet.dst_port(),
+               seq: packet.seq_num(),
+               ack: ack_num,
+               control: control,
+               payload: packet.payload(),
+           })
     }
 
     pub fn header_len(&self) -> usize {

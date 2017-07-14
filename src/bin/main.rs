@@ -14,14 +14,14 @@ fn create_client(raw: platform::RawSocket) {
     let endpoint = tcp::Endpoint::new(ipv4::Address::default(), 8090);
     let mut interface = socket::SocketInterface::new(endpoint, raw);
 
-    let mut socket =
-        interface.connect(tcp::Endpoint::new(ipv4::Address::from_bytes(&[127, 0, 0, 1]), 6969))
-            .unwrap();
+    let mut socket = interface
+        .connect(tcp::Endpoint::new(ipv4::Address::from_bytes(&[127, 0, 0, 1]), 6969))
+        .unwrap();
+    thread::sleep_ms(2000);
     socket.write(&[69, 4, 20]).unwrap();
 
     let mut buf = [0; 1024];
     let len = socket.read(&mut buf).unwrap();
-    println!("Client recieved: {:?}", &buf[..len]);
 
     thread::sleep(Duration::from_secs(2));
     socket.write(&[69, 69, 69, 69]).unwrap();
@@ -52,7 +52,6 @@ fn create_server(raw: platform::RawSocket) -> thread::JoinHandle<()> {
                         Err(_) => break,
                     };
 
-                    println!("Server recieved: {:?}", packet);
                     if packet.len() == 4 {
                         interface.lock().unwrap().stop();
                     } else {
@@ -79,7 +78,10 @@ fn main() {
         Ok(socket) => socket,
         Err(error) => panic!("Error creating RawSocket: {}", error),
     };
+
     create_client(raw);
 
-    server.join().unwrap();
+    thread::sleep_ms(10000000);
+
+    // server.join().unwrap();
 }

@@ -4,15 +4,15 @@ use std::mem;
 use std::sync::{Arc, Mutex, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::{PacketBuffer, Socket, SocketState};
-use ::tcp;
-use ::ipv4;
-use ::platform;
-use ::error::{Error, SocketError};
+use tcp;
+use ipv4;
+use platform;
+use error::{Error, SocketError};
 
-const RECV_BUF_LEN: usize = 2048;
+const RECV_BUF_LEN: usize = 17000;
 
 type SocketMap = HashMap<tcp::Endpoint, (SocketState, Option<mpsc::Sender<PacketBuffer>>)>;
 
@@ -49,7 +49,8 @@ impl Interface {
             sockets.insert(remote, (SocketState::SynSent, None));
             Self::send_syn(&self.raw, self.endpoint, remote);
         }
-        rx.recv_timeout(Duration::from_secs(2)).map_err(|_| SocketError::Timeout)
+        rx.recv_timeout(Duration::from_secs(2))
+            .map_err(|_| SocketError::Timeout)
     }
 
     pub fn close(&mut self, remote: tcp::Endpoint) {
@@ -66,27 +67,30 @@ impl Interface {
         let (tx_send, tx_recv) = mpsc::channel::<(tcp::Endpoint, PacketBuffer)>();
 
         self.send_thread = Some({
-            let running = self.running.clone();
-            let local = self.endpoint;
-            let raw = self.raw.clone();
-            let mut sockets = self.sockets.clone();
-            thread::spawn(move || {
-                while running.load(Ordering::Relaxed) {
-                    let buf = tx_recv.recv().unwrap();
-                    Self::send(&raw, &mut sockets, local, buf.0, &*buf.1.payload);
-                }
-            })
-        });
+                                    let running = self.running.clone();
+                                    let local = self.endpoint;
+                                    let raw = self.raw.clone();
+                                    let mut sockets = self.sockets.clone();
+                                    thread::spawn(move || while running.load(Ordering::Relaxed) {
+                                                      let buf = tx_recv.recv().unwrap();
+                                                      Self::send(&raw,
+                                                                 &mut sockets,
+                                                                 local,
+                                                                 buf.0,
+                                                                 &*buf.1.payload);
+                                                  })
+                                });
 
-        self.recv_thread = Some({
-            let running = self.running.clone();
-            let endpoint = self.endpoint;
-            let raw = self.raw.clone();
-            let sockets = self.sockets.clone();
-            thread::spawn(move || {
-                Self::recv(raw, running, endpoint, sockets, tx, tx_send);
-            })
-        });
+        self.recv_thread =
+            Some({
+                     let running = self.running.clone();
+                     let endpoint = self.endpoint;
+                     let raw = self.raw.clone();
+                     let sockets = self.sockets.clone();
+                     thread::spawn(move || {
+                                       Self::recv(raw, running, endpoint, sockets, tx, tx_send);
+                                   })
+                 });
     }
 
     pub fn stop(&mut self) {
@@ -234,8 +238,10 @@ impl Interface {
 
                 let (seq, ack) = {
                     let mut sockets = sockets.lock().unwrap();
-                    if let SocketState::Established { seq: ref mut seq, ack: ref mut ack } =
-                        sockets.get_mut(&remote).unwrap().0 {
+                    if let SocketState::Established {
+                               seq: ref mut seq,
+                               ack: ref mut ack,
+                           } = sockets.get_mut(&remote).unwrap().0 {
                         let seqack = (*seq, *ack);
                         println!("SEQ: {}, ACK: {:?}", seq, ack);
                         *seq += payload.len() as u32;
@@ -288,8 +294,8 @@ impl Interface {
                                     Self::send_ack(&raw, &tcp, local, remote);
                                     let (rx_tx, rx_rx) = mpsc::channel();
 
-
-                                    socket_send.send(Socket::new(remote, rx_rx, tx_send.clone()))
+                                    socket_send
+                                        .send(Socket::new(remote, rx_rx, tx_send.clone()))
                                         .unwrap();
                                     socket.0 = SocketState::Established {
                                         seq: tcprepr.ack.unwrap(),
@@ -320,14 +326,16 @@ impl Interface {
                                              tcprepr.seq);
                                 }
                             }
-                            SocketState::Established { ack: ref mut ack, seq: seq } => {
+                            SocketState::Established {
+                                ack: ref mut ack,
+                                seq: seq,
+                            } => {
                                 let socket = match socket.1 {
                                     Some(ref socket) => socket,
                                     None => return,
                                 };
                                 *ack += tcp.payload().len() as u32;
-                                socket.send(PacketBuffer::new(tcp.payload()))
-                                    .unwrap();
+                                socket.send(PacketBuffer::new(tcp.payload())).unwrap();
                             }
                             SocketState::Closed => (),
                         };
@@ -348,7 +356,8 @@ impl Interface {
                 // Channel for sending packets
                 let (rx_tx, rx_rx) = mpsc::channel();
 
-                socket_send.send(Socket::new(remote, rx_rx, tx_send.clone()))
+                socket_send
+                    .send(Socket::new(remote, rx_rx, tx_send.clone()))
                     .unwrap();
                 sockets.insert(remote, (SocketState::SynReceived, Some(rx_tx)));
             }
@@ -361,18 +370,22 @@ impl Interface {
             sockets: Arc<Mutex<SocketMap>>,
             socket_send: mpsc::Sender<Socket>,
             tx_send: mpsc::Sender<(tcp::Endpoint, PacketBuffer)>) {
+        let mut index = 0;
         while running.load(Ordering::Relaxed) {
             let mut buf = [0; RECV_BUF_LEN];
-            let len = raw.recv(&mut buf).unwrap_or(0);
+            let len = raw.recv(index, &mut buf).unwrap_or(0);
             if len == 0 {
                 continue;
             }
+            index += 1;
+
             let ip = ipv4::Packet::new(&buf[..len]).unwrap();
-            let iprepr = match ipv4::Repr::parse(&ip) {
+            let iprepr = ipv4::Repr::parse(&ip);
+            let iprepr = match iprepr {
                 Ok(repr) => repr,
                 Err(Error::UnknownProtocol) => continue,
                 Err(Error::Truncated) => {
-                    // println!("WARN: IPv4 packet exceeded MTU");
+                    println!("WARN: IPv4 packet exceeded MTU");
                     continue;
                 }
                 Err(error) => {
@@ -380,6 +393,7 @@ impl Interface {
                     continue;
                 }
             };
+
             let tcp = tcp::Packet::new(&ip.payload()[..iprepr.payload_len]).unwrap();
             let tcprepr = match tcp::Repr::parse(&tcp, &iprepr.src_addr, &iprepr.dst_addr) {
                 Ok(repr) => repr,
@@ -388,6 +402,7 @@ impl Interface {
                     continue;
                 }
             };
+
             if tcprepr.dst_port == local.port {
                 let local = tcp::Endpoint::new(iprepr.dst_addr, tcprepr.dst_port);
                 let remote = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
