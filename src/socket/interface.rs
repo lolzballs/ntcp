@@ -406,6 +406,9 @@ impl Interface {
             if tcprepr.dst_port == local.port {
                 let local = tcp::Endpoint::new(iprepr.dst_addr, tcprepr.dst_port);
                 let remote = tcp::Endpoint::new(iprepr.src_addr, tcprepr.src_port);
+
+                let start = Instant::now();
+
                 Self::process_tcp(&raw,
                                   local,
                                   remote,
@@ -414,6 +417,8 @@ impl Interface {
                                   &sockets,
                                   &socket_send,
                                   &tx_send);
+
+                println!("{:?}", start.elapsed());
             }
         }
     }

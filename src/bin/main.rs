@@ -25,6 +25,7 @@ fn create_client(raw: platform::RawSocket) {
 
     thread::sleep(Duration::from_secs(2));
     socket.write(&[69, 69, 69, 69]).unwrap();
+    socket.write(&[255, 69, 69, 69, 4, 20]).unwrap();
 }
 
 fn create_server(raw: platform::RawSocket) -> thread::JoinHandle<()> {
@@ -52,7 +53,7 @@ fn create_server(raw: platform::RawSocket) -> thread::JoinHandle<()> {
                         Err(_) => break,
                     };
 
-                    if packet.len() == 4 {
+                    if packet[0] == 255 {
                         interface.lock().unwrap().stop();
                     } else {
                         socket.write(&[4, 20, 4, 20]).unwrap();
@@ -81,7 +82,5 @@ fn main() {
 
     create_client(raw);
 
-    thread::sleep_ms(10000000);
-
-    // server.join().unwrap();
+    server.join().unwrap();
 }
